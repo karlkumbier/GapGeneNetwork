@@ -17,28 +17,26 @@ for (i in 1:n.dict) {
   image(im2plot)
 }
 
-neighbors <- sapply(1:n.dict, getNeighbors, atoms=dict.mat)
-
-
 # Local network analysis for transcription factors expressed in pp1 and pp2
 tf.data <- X[, tfInd]
 tf.alphas <- alpha[, tfInd]
+tf.names <- geneNames[tfInd]
 
+pp.idx <- 7
 pp.region <- 6:8 #first three segmentation stripes
 expressed <- function(x) any(x > 0.1)
 local.tf.idcs <- which(apply(tf.alphas[pp.region,], 2, expressed))
 local.tf.data <- tf.data[, local.tf.idcs]
+local.tf.names <- tf.names[local.tf.idcs]
 
-pp.weights <- Dstd[, pp.region]
+pp.weights <- Dstd[, pp.idx]
 rescale <- function(x) return(x / sum(x))
-pp.weights <- apply(pp.weights, MARGIN=2, rescale)
+pp.weights <- rescale(pp.weights)
 
-#pp.weights <- apply(pp.weights, 1, max)
+local.correlation <- weightedCor(local.tf.data, pp.weights)
+local.correlation <- mergeDuplicates(local.correlation, local.tf.names)
 
-local.correlation <- apply(pp.weights, MARGIN=2, weightedCor, data.mat=local.tf.data)
-avg.local.cor <- matrix(rowMeans(local.correlation), ncol=length(local.tf.idcs))
-
-cex.lab <- 0.25
+cex.lab <- 0.9
 pdf('heatmap.pdf')
 heatmap(local.correlation, cexRow=cex.lab, cexCol=cex.lab)
 dev.off()
