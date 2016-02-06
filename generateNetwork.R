@@ -1,5 +1,6 @@
 library(R.matlab)
 library(RColorBrewer)
+library(pcalg)
 source('utilities.R')
 load('dictFitDataNLS.RData')
 mat.data <- readMat('embTemplate.mat')
@@ -22,19 +23,93 @@ tf.data <- X[, tfInd]
 tf.alphas <- alpha[, tfInd]
 tf.names <- geneNames[tfInd]
 
-pp.idx <- 7
-pp.region <- 6:8 #first three segmentation stripes
-expressed <- function(x) any(x > 0.1)
-local.tf.idcs <- which(apply(tf.alphas[pp.region,], 2, expressed))
-local.tf.data <- tf.data[, local.tf.idcs]
-local.tf.names <- tf.names[local.tf.idcs]
+pp.centers <- c(6:9, 17, 20)
+pp.neighbors <- list(c(4, 7), c(6, 8), c(7, 9), c(8, 17), c(9, 20), c(17, 20))
 
-pp.weights <- Dstd[, pp.idx]
-rescale <- function(x) return(x / sum(x))
-pp.weights <- rescale(pp.weights)
+local.correlation.mats <- list()
+local.weighted.expression <- list()
+for (i in 1:length(pp.centers)) {
+  pp.idx <- pp.centers[i]
+  pp.region <- pp.neighbors[[i]]
+  expressed <- function(x) any(x > 0.1)
+  local.tf.idcs <- which(apply(tf.alphas[pp.region,], 2, expressed))
+  local.tf.data <- tf.data[, local.tf.idcs]
+  local.tf.names <- tf.names[local.tf.idcs]
 
-local.correlation <- weightedCor(local.tf.data, pp.weights)
-local.correlation <- mergeDuplicates(local.correlation, local.tf.names)
+  pp.weights <- Dstd[, pp.idx]
+  rescale <- function(x) return(x / sum(x))
+  pp.weights <- rescale(pp.weights)
+  local.weighted.expression[[i]] <- apply(local.tf.data, 2, '*', pp.weights)
+
+  local.correlation <- weightedCor(local.tf.data, pp.weights)
+  local.correlation <- mergeDuplicates(local.correlation, local.tf.names)
+  local.correlation.mats[[i]] <- local.correlation
+}
+
+# don't want n=405 since pixels are highly dependent and many are 0
+local.pc.fit <- list()
+for (i in 1:length(pp.centers)) {
+  labs <- rownames(local.correlation.mats[[i]])
+  local.pc.fit[i] <- pc(suffStat=list(C=local.correlation.mats[[i]], n=405), indepTest=gaussCItest, alpha=0.1, labels=labs)
+}
+
+# analysis of graph data
+pdf('testGraph.pdf')
+plot(local.pc.fit[[1]])
+dev.off()
+
+# TODO: for all nodes in any local correlation newtorks, compare edges for all
+# local networks where the node occurs
+local.network.genes <- sapply(local.correlation.mats, rownames)
+local.network.genes <- unique(unlist(local.genes))
+
+all.children <- list()
+for (g in local.network.genes) {
+
+  # check each network to determine if gene is expressed in the spatial region
+  g.children <- list()
+  for (i in 1:length(local.pc.fit)) {
+    graph <- local.pc.fit[[i]]@graph
+    graph.edges <- graph@edgeL
+    graph.nodes <- graph@nodes
+
+    g.idx <- which(graph.nodes == g)
+    #TODO: differentiate between case where node is in graph but empty and where
+    #node is not in graph
+    if (length(g.idx) > 0) {
+      if (length(unlist(graph.edges[[g.idx]])) > 0) { 
+        g.children[[i]] <- graph.nodes[unlist(graph.edges[[g.idx]])]
+      } else {
+        g.children[[i]] <- 'NONE'
+      }
+    } else {
+      g.children[[i]] <- numeric(0)
+    }
+  }
+  all.children[[g]] <- g.children
+}
+
+
+
+
+
+# Determine genes that are in all local correlation networks for segmentation
+# stripes
+local.genes <- sapply(local.correlation.mats, rownames)
+global.genes <- unique(unlist(local.genes))
+for (i in 1:length(local.genes)) {
+  global.genes <- intersect(global.genes, local.genes[[i]])
+}
+
+local.correlation.subset <- array(0, c(length(global.genes), length(global.genes), length(local.genes)))
+for (i in 1:length(local.genes)) {
+  local.correlation.subset[,,i] <- local.correlation.mats[[i]][global.genes, global.genes]
+}
+
+temp <- apply(local.correlation.subset, MARGIN=c(1, 2), mean)
+rownames(temp) <- global.genes
+colnames(temp) <- global.genes
+heatmap(temp)
 
 cex.lab <- 0.9
 pdf('heatmap.pdf')
