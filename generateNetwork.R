@@ -5,7 +5,7 @@ source('utilities.R')
 load('dictFitDataNLS.RData')
 mat.data <- readMat('embTemplate.mat')
 template <- mat.data$template[,,1]
-cols <- rev(brewer.pal(11, 'Spectral'))
+cols <- brewer.pal(11, 'RdYlGn')
 
 n.dict <- ncol(Dstd) - 1
 dict.mat <- array(0, c(16, 32, n.dict))
@@ -23,8 +23,8 @@ tf.data <- X[, tfInd]
 tf.alphas <- alpha[, tfInd]
 tf.names <- geneNames[tfInd]
 
-pp.centers <- c(6:9, 17, 20)
-pp.neighbors <- list(c(4, 7), c(6, 8), c(7, 9), c(8, 17), c(9, 20), c(17, 20))
+pp.centers <- c(5:9, 17, 20)
+pp.neighbors <- list(c(4, 6), c(4, 7), c(6, 8), c(7, 9), c(8, 17), c(9, 20), c(17, 20))
 
 local.correlation.mats <- list()
 local.weighted.expression <- list()
@@ -46,16 +46,59 @@ for (i in 1:length(pp.centers)) {
   local.correlation.mats[[i]] <- local.correlation
 }
 
+# Look at spectral clustering for pp7 (based on CG13894 experiment)
+cors <- local.correlation.mats[[1]]
+spectral.output5 <- spectralVectors(cors, threshold=0.25, n.eigen=1)$sv
+spectral.cluster5 <- kmeans(spectral.output5, centers=2)
+clusters5 <- spectral.cluster5$cluster
+
+cors <- local.correlation.mats[[2]]
+spectral.output6 <- spectralVectors(cors, threshold=0.25, n.eigen=1)$sv
+spectral.cluster6 <- kmeans(spectral.output6, centers=2)
+clusters6 <- spectral.cluster6$cluster
+
+cors <- local.correlation.mats[[3]]
+spectral.output7 <- spectralVectors(cors, threshold=0.25, n.eigen=1)$sv
+spectral.cluster7 <- kmeans(spectral.output7, centers=2)
+clusters7 <- spectral.cluster7$cluster
+
+jointly.expressed <- intersect(rownames(spectral.output5), rownames(spectral.output6))
+jointly.expressed <- intersect(rownames(spectral.output7), jointly.expressed)
+s5.idcs <- which(rownames(spectral.output5) %in% jointly.expressed)
+s6.idcs <- which(rownames(spectral.output6) %in% jointly.expressed)
+s7.idcs <- which(rownames(spectral.output7) %in% jointly.expressed)
+v5 <- spectral.output5[s5.idcs,]
+v6 <- spectral.output6[s6.idcs,]
+v7 <- spectral.output7[s7.idcs,]
+v <- cbind(v5, v6, v7)
+
+
+cols <- brewer.pal(11, 'RdYlBu')
+heatmap(v, labRow=rownames(pp.cors), col=cols)
+spectral.clustering <- kmeans(spectral.vectors, centers=3)
+clusters <- spectral.clustering$cluster
+genes <- rownames(pp.cors)[-idcs2remove]
+
+
+
+
+
+
+
+
+
+
+# PC algorithm analysis
 # don't want n=405 since pixels are highly dependent and many are 0
 local.pc.fit <- list()
 for (i in 1:length(pp.centers)) {
   labs <- rownames(local.correlation.mats[[i]])
-  local.pc.fit[i] <- pc(suffStat=list(C=local.correlation.mats[[i]], n=405), indepTest=gaussCItest, alpha=0.1, labels=labs)
+  local.pc.fit[[i]] <- pc(suffStat=list(C=local.correlation.mats[[i]], n=405), indepTest=gaussCItest, alpha=0.1, labels=labs)
 }
 
 # analysis of graph data
 pdf('testGraph.pdf')
-plot(local.pc.fit[[1]])
+plot(fit)
 dev.off()
 
 # TODO: for all nodes in any local correlation newtorks, compare edges for all

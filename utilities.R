@@ -72,7 +72,7 @@ mergeMax <- function(x) {
     return(x[max.idx])
   }
   row.max <- t(apply(x, 1, maxCor))
-  return(row.max)
+  return(c(row.max))
 }
 
 mergeDuplicates <- function(cor.mat, node.names) {
@@ -86,8 +86,8 @@ mergeDuplicates <- function(cor.mat, node.names) {
 
   mergeMat <- function(x, idcs) {
     merged <- mergeMax(x[, idcs])
-    x[idcs, ] <- merged
-    x[, idcs] <- merged
+    x[idcs, ] <- matrix(rep(merged, length(idcs)), ncol=ncol(x), byrow=TRUE)
+    x[, idcs] <- matrix(rep(merged, length(idcs)), nrow=nrow(x))
     return(x)
   }
   for (i in 1:length(duplicates)) {
@@ -100,6 +100,38 @@ mergeDuplicates <- function(cor.mat, node.names) {
   return(cor.mat)
 }
 
+spectralVectors <- function(cors, threshold, n.eigen) {
 
+  # determine threhsold value based on wuantiles of correlation matrix
+  cor.vector <- cors[upper.tri(cors, diag=FALSE)]
+  threshold <- max(threshold, 1-threshold)
+  qt.threshold <- quantile(cor.vector, c(1-threshold, threshold))
+
+  # calculate adjacency and normalizing matrices
+  adjacency <- cors
+  diag(adjacency) <- 0
+  adjacency[adjacency <= qt.threshold[1] | adjacency >= qt.threshold[2]] <- 1
+  adjacency[adjacency != 1] <- 0
+
+  n <- nrow(adjacency)
+  col.sums <- colSums(adjacency)
+  col.sums.sqrt <- sqrt(col.sums)
+  d.sqrt <- col.sums.sqrt * diag(n)
+
+  # remove indices with no neighbors
+  idcs2remove <- which(colSums(d.sqrt == 0) == n)
+  if (length(idcs2remove) != 0) {
+      d.sqrt <- d.sqrt[-idcs2remove, -idcs2remove]
+    adjacency <- adjacency[-idcs2remove, -idcs2remove]
+      n <- n - length(idcs2remove)
+  }                          
+                             
+  L <- diag(n) - solve(d.sqrt) %*% adjacency %*% solve(d.sqrt)
+  e <- eigen(L)              
+
+  spectral.vectors <- matrix(e$vectors[,(n-n.eigen):(n-1)], nrow=nrow(cors))
+  rownames(spectral.vectors) <- rownames(cors)
+  return(list(sv=spectral.vectors, e=e$values))
+}
 
 
