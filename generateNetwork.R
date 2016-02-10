@@ -1,22 +1,23 @@
 library(R.matlab)
 library(RColorBrewer)
 library(pcalg)
+library(igraph)
 source('utilities.R')
 load('dictFitDataNLS.RData')
 mat.data <- readMat('embTemplate.mat')
 template <- mat.data$template[,,1]
-cols <- brewer.pal(11, 'RdYlGn')
+cols <- brewer.pal(11, 'RdYlBu')
 
 n.dict <- ncol(Dstd) - 1
 dict.mat <- array(0, c(16, 32, n.dict))
 
-for (i in 1:n.dict) {
-  dict.mat[,,i] <- generateImage(template, Dstd[,i])
-  dev.new()
-  im2plot <- t(dict.mat[,,i])
-  im2plot <- im2plot[,seq(ncol(im2plot), 1, by=-1)]
-  image(im2plot)
-}
+#for (i in 1:n.dict) {
+#  dict.mat[,,i] <- generateImage(template, Dstd[,i])
+#  dev.new()
+#  im2plot <- t(dict.mat[,,i])
+#  im2plot <- im2plot[,seq(ncol(im2plot), 1, by=-1)]
+#  image(im2plot)
+#}
 
 # Local network analysis for transcription factors expressed in pp1 and pp2
 tf.data <- X[, tfInd]
@@ -47,37 +48,38 @@ for (i in 1:length(pp.centers)) {
 }
 
 # Look at spectral clustering for pp7 (based on CG13894 experiment)
-cors <- local.correlation.mats[[1]]
-spectral.output5 <- spectralVectors(cors, threshold=0.25, n.eigen=1)$sv
-spectral.cluster5 <- kmeans(spectral.output5, centers=2)
-clusters5 <- spectral.cluster5$cluster
+cor.list <- local.correlation.mats[1:3]
+threshold <- sapply(cor.list, getQtThreshold, qt.threshold=0.05)
+threshold <- c(min(thresholds[1,]), max(thresholds[2,]))
+modules <- getLocalModules(cor.list)
 
-cors <- local.correlation.mats[[2]]
-spectral.output6 <- spectralVectors(cors, threshold=0.25, n.eigen=1)$sv
-spectral.cluster6 <- kmeans(spectral.output6, centers=2)
-clusters6 <- spectral.cluster6$cluster
+network.subsets <- lapply(cor.list, subsetNetwork, genes=modules$genes)
+setwd('./plots')
+for (i in 1:length(network.subsets)) {
 
-cors <- local.correlation.mats[[3]]
-spectral.output7 <- spectralVectors(cors, threshold=0.25, n.eigen=1)$sv
-spectral.cluster7 <- kmeans(spectral.output7, centers=2)
-clusters7 <- spectral.cluster7$cluster
+  pdf(paste0('localNetwork', i, '.pdf'))
+  plotCorGraph(network.subsets[[i]], threshold=threshold)
+  dev.off()
+}
 
-jointly.expressed <- intersect(rownames(spectral.output5), rownames(spectral.output6))
-jointly.expressed <- intersect(rownames(spectral.output7), jointly.expressed)
-s5.idcs <- which(rownames(spectral.output5) %in% jointly.expressed)
-s6.idcs <- which(rownames(spectral.output6) %in% jointly.expressed)
-s7.idcs <- which(rownames(spectral.output7) %in% jointly.expressed)
-v5 <- spectral.output5[s5.idcs,]
-v6 <- spectral.output6[s6.idcs,]
-v7 <- spectral.output7[s7.idcs,]
-v <- cbind(v5, v6, v7)
+for (i in 1:length(modules$mod)) {
+  mod <- modules$mod[[i]]
+  print(i)
+  if (length(mod) <= 1) next
+  module.subsets <- lapply(cor.list, subsetNetwork, genes=mod)
+  for (j in 1:length(module.subsets)) {
+
+    print(j)
+    pdf(paste0('moduleNetworkConstantThresh_m', i, '_pp', j, '.pdf'))
+    plotCorGraph(module.subsets[[j]], threshold=threshold, scale=2)
+    dev.off()
+  }
+} 
 
 
-cols <- brewer.pal(11, 'RdYlBu')
-heatmap(v, labRow=rownames(pp.cors), col=cols)
-spectral.clustering <- kmeans(spectral.vectors, centers=3)
-clusters <- spectral.clustering$cluster
-genes <- rownames(pp.cors)[-idcs2remove]
+
+
+
 
 
 

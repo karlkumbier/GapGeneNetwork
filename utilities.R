@@ -103,9 +103,7 @@ mergeDuplicates <- function(cor.mat, node.names) {
 spectralVectors <- function(cors, threshold, n.eigen) {
 
   # determine threhsold value based on wuantiles of correlation matrix
-  cor.vector <- cors[upper.tri(cors, diag=FALSE)]
-  threshold <- max(threshold, 1-threshold)
-  qt.threshold <- quantile(cor.vector, c(1-threshold, threshold))
+  qt.threshold <- getQtThreshold(cors, threshold) 
 
   # calculate adjacency and normalizing matrices
   adjacency <- cors
@@ -134,4 +132,80 @@ spectralVectors <- function(cors, threshold, n.eigen) {
   return(list(sv=spectral.vectors, e=e$values))
 }
 
+getLocalModules <- function(cor.list, thrsh=0.25, n.eigen=1) {
 
+  set.seed(47)
+  spectral.outputs <- lapply(cor.list, spectralVectors, threshold=thrsh, n.eigen=n.eigen)
+  spectral.vectors <- sapply(spectral.outputs, '[', 'sv')
+  spectral.clustering <- lapply(spectral.vectors, kmeans, center=2, nstart=10)
+  spectral.clusters <- sapply(spectral.clustering, '[', 'cluster')
+
+  # find all genes that are expressed in all local networks
+  gene.names <- sapply(cor.list, rownames)
+  jointly.expressed <- Reduce(intersect, gene.names)
+
+  # for each jointly expressed gene, determine its cluster in the different
+  # local networks
+  cluster.mat <- matrix(0, nrow=length(jointly.expressed), ncol=length(cor.list))
+  for (i in 1:length(jointly.expressed)) {
+
+    gene <- jointly.expressed[i]
+    gene.idcs <- sapply(gene.names, function(g) which(g==gene))
+    cluster.mat[i,] <- mapply(function(clusters, idx) clusters[idx], spectral.clusters, gene.idcs)
+  }
+
+  module.mat <- matrix(FALSE, nrow=length(jointly.expressed), ncol=length(jointly.expressed))
+  for (i in 1:nrow(module.mat)) {
+    for (j in i:nrow(module.mat)) {
+      mod <- all(cluster.mat[i,] == cluster.mat[j,])
+      module.mat[i,j] <- mod
+      module.mat[j,i] <- mod
+    }
+  }
+  rownames(module.mat) <- jointly.expressed
+  colnames(module.mat) <- jointly.expressed
+
+  modules <- unique(apply(module.mat, MARGIN=1, which))
+  modules <- sapply(modules, function(m) jointly.expressed[m])
+  return(list(mod=modules, mat=module.mat, genes=jointly.expressed))
+}
+
+subsetNetwork <- function(cors, genes) {
+
+  # subset network to include only observations specified by genes
+  cor.names <- rownames(cors)
+  gene.idcs <- cor.names %in% genes
+  return(cors[gene.idcs, gene.idcs])
+}
+
+plotCorGraph <- function(cors, threshold=NULL, qt.threshold=0.5, scale=0.5) {
+
+  
+  if (is.null(threshold)) {
+    threshold <- getQtThreshold(cors, qt.threshold) 
+  }
+  # remove edges for correlations below quantile threshold
+  diag(cors) <- 0
+  cors[cors > threshold[1] & cors < threshold[2]] <- 0
+
+  if (! all(cors == 0)) {
+    graph <- graph.adjacency(cors, mode='lower', weighted=TRUE)
+    edge.sign <- sign(E(graph)$weight)
+    edge.weight <- abs(E(graph)$weight)
+    E(graph)$color <- ifelse(edge.sign > 0, 'green', 'red')
+
+    graph.layout <- layout.circle(graph)
+    plot(graph, edge.width=exp(scale * edge.weight) / scale, vertex.label.cex=0.5,
+         layout=graph.layout)
+  } else{
+    warning('no interactions at specified threshold')
+  }
+}
+
+getQtThreshold <- function(cors, qt.threshold) {
+
+  qt.threshold <- max(qt.threshold, 1-qt.threshold)
+  cor.vector <- cors[upper.tri(cors, diag=FALSE)]
+  threshold <- quantile(cor.vector, c(1-qt.threshold, qt.threshold))
+  return(threshold)
+}
