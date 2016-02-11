@@ -119,15 +119,22 @@ spectralVectors <- function(cors, threshold, n.eigen) {
   # remove indices with no neighbors
   idcs2remove <- which(colSums(d.sqrt == 0) == n)
   if (length(idcs2remove) != 0) {
-      d.sqrt <- d.sqrt[-idcs2remove, -idcs2remove]
+    d.sqrt <- d.sqrt[-idcs2remove, -idcs2remove]
     adjacency <- adjacency[-idcs2remove, -idcs2remove]
-      n <- n - length(idcs2remove)
+    n <- n - length(idcs2remove)
   }                          
                              
   L <- diag(n) - solve(d.sqrt) %*% adjacency %*% solve(d.sqrt)
   e <- eigen(L)              
 
-  spectral.vectors <- matrix(e$vectors[,(n-n.eigen):(n-1)], nrow=nrow(cors))
+  spectral.vectors <- matrix(e$vectors[,(n-n.eigen):(n-1)], nrow=n)
+  
+  # add back removed observations with value of 0
+  if (length(idcs2remove) != 0) {
+    temp <- numeric(nrow(cors))
+    temp[-idcs2remove] <- spectral.vectors
+    spectral.vectors <- matrix(temp, nrow=nrow(cors))
+  }
   rownames(spectral.vectors) <- rownames(cors)
   return(list(sv=spectral.vectors, e=e$values))
 }
@@ -141,7 +148,7 @@ getLocalModules <- function(cor.list, thrsh=0.25, n.eigen=1) {
   spectral.clusters <- sapply(spectral.clustering, '[', 'cluster')
 
   # find all genes that are expressed in all local networks
-  gene.names <- sapply(cor.list, rownames)
+  gene.names <- lapply(cor.list, rownames)
   jointly.expressed <- Reduce(intersect, gene.names)
 
   # for each jointly expressed gene, determine its cluster in the different
@@ -208,4 +215,18 @@ getQtThreshold <- function(cors, qt.threshold) {
   cor.vector <- cors[upper.tri(cors, diag=FALSE)]
   threshold <- quantile(cor.vector, c(1-qt.threshold, qt.threshold))
   return(threshold)
+}
+
+forceSignAgreement <- function(networks) {
+
+  # ensure that sign agrees for all pairwise interactions in all correlation
+  # matrices of networks by setting those that disagree to 0
+  cor.signs <- sapply(networks, sign)
+  same.sign <- apply(cor.signs, 1, function(r) length(unique(r)) == 1)
+  matchedSigns <- function(mat, same.sign) {
+      mat[!same.sign] <- 0
+    return(mat)
+  } 
+  networks <- lapply(network.subsets, matchedSigns, same.sign=same.sign)
+  return(networks)
 }

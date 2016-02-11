@@ -24,8 +24,11 @@ tf.data <- X[, tfInd]
 tf.alphas <- alpha[, tfInd]
 tf.names <- geneNames[tfInd]
 
-pp.centers <- c(5:9, 17, 20)
-pp.neighbors <- list(c(4, 6), c(4, 7), c(6, 8), c(7, 9), c(8, 17), c(9, 20), c(17, 20))
+#pp.centers <- c(5:9, 17, 20)
+#pp.neighbors <- list(c(4, 6), c(4, 7), c(6, 8), c(7, 9), c(8, 17), c(9, 20), c(17, 20))
+# hindgut pp as determined by annotations
+pp.centers <- c(17:19)
+pp.neighbors <- list(c(16, 18), c(10, 19, 20), c(18, 21))
 
 local.correlation.mats <- list()
 local.weighted.expression <- list()
@@ -48,46 +51,40 @@ for (i in 1:length(pp.centers)) {
 }
 
 # Look at spectral clustering for pp7 (based on CG13894 experiment)
+# Look at hindgut pp networks
 cor.list <- local.correlation.mats[1:3]
 threshold <- sapply(cor.list, getQtThreshold, qt.threshold=0.05)
 threshold <- c(min(thresholds[1,]), max(thresholds[2,]))
 modules <- getLocalModules(cor.list)
 
 network.subsets <- lapply(cor.list, subsetNetwork, genes=modules$genes)
-setwd('./plots')
+# only consider observations with the same sign across all pp
+#network.subsets <- forceSignAgreement(networkSubsets) 
+
+
+setwd('./plots/hindgut')
 for (i in 1:length(network.subsets)) {
 
   pdf(paste0('localNetwork', i, '.pdf'))
-  plotCorGraph(network.subsets[[i]], threshold=threshold)
+  plotCorGraph(network.subsets[[i]], qt.threshold=0.025)
   dev.off()
 }
 
 for (i in 1:length(modules$mod)) {
   mod <- modules$mod[[i]]
-  print(i)
   if (length(mod) <= 1) next
-  module.subsets <- lapply(cor.list, subsetNetwork, genes=mod)
+  module.subsets <- lapply(network.subsets, subsetNetwork, genes=mod)
   for (j in 1:length(module.subsets)) {
 
-    print(j)
     pdf(paste0('moduleNetworkConstantThresh_m', i, '_pp', j, '.pdf'))
-    plotCorGraph(module.subsets[[j]], threshold=threshold, scale=2)
+    plotCorGraph(module.subsets[[j]], qt.threshold=0.5, scale=1)
     dev.off()
   }
 } 
 
-
-
-
-
-
-
-
-
-
-
-
-
+# consider the module with gap genes
+subset.network <- lapply(cor.list[1:2], subsetNetwork, genes=modules$mod[[4]]) 
+subset.modules <- getLocalModules(subset.network)
 
 
 # PC algorithm analysis
