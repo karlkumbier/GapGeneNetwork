@@ -1,15 +1,23 @@
 
 plotEmb <- function(D, width, height) {
-  
+  # Convert a column vector of expression values for plotting
+  # args:
+  #  D: a column vector of expression levels
+  #  width: image width
+  #  height: image height 
   img <- matrix(D, nrow=height, ncol=width)
   return(img)
 
 } 
  
-
 generateImage <- function(template, data) {
 
-  # function for plotting expression data on embryo template
+  # plot expression levels onto a template that defines the embryo ellipse
+  # args:
+  #  template: a numeric matrix with the same size as the desired image. An
+  #   entry of 1 indicates embryo pixels and 0 indicates non-embryo
+  #  data: a column vector of values to plot, with length equal to the number of
+  #   1s in template
   embryo.idcs <- which(template == 1, arr.ind=TRUE)
   outer.idcs <- which(template == 0, arr.ind=TRUE)
   n.row <- nrow(template)
@@ -26,10 +34,14 @@ generateImage <- function(template, data) {
   return(full.img)
 } 
 
-
 weightedCorVector <- function(x, y, w) {
 
-  # calculate the weighted correlation between two vectors x and y
+  # Calculate the weighted correlation between two vectors
+  # args:
+  #  x: a numeric vector
+  #  y: a numeric vector
+  #  w: a weight vector that sums to 1, giving the weight of each component in
+  #   the correlation calculation
   weightedVar <- function(x, w) {
     weighted.mean <- sum(w * x)
     weighted.var <- sum( w * (x - weighted.mean) ^ 2)
@@ -50,7 +62,11 @@ weightedCorVector <- function(x, y, w) {
 
 weightedCor <- function(data.mat, w) {
 
-  # wraper to compute weighted correlation matrix
+  # A wraper to compute weighted correlation between all vectors in a matrix
+  # args:
+  #  data.mat: the data matrix
+  #   w: a weight vector that sums to 1, giving the weight of each component in
+  #   the correlation calculation
   n.obs <- ncol(data.mat)
   cor.mat <- matrix(0, nrow=n.obs, ncol=n.obs)
   for (i in 1:n.obs) {
@@ -65,8 +81,9 @@ weightedCor <- function(data.mat, w) {
 
 mergeMax <- function(x) {
 
-  # given a matrix with multiple column observations, take the maximum across
-  # rows
+  # Return the maximum absolute value of each row in a matrix
+  # args:
+  #  x: a numeric matrix
   maxCor <- function(x) {
     max.idx <- which.max(abs(x))
     return(x[max.idx])
@@ -77,13 +94,23 @@ mergeMax <- function(x) {
 
 mergeDuplicates <- function(cor.mat, node.names) {
 
+  # Merge duplicated observations in a correlation matrix by taking the maximum
+  # absolute correlation between duplicated variables and all other variables
+  # args:
+  #  cor.mat: a numeric matrix of correlations
+  #  node.names: a character vector specifying the name of each variable in
+  #   cor.mat
+  
   if (nrow(cor.mat) != length(node.names)) stop('dimension mismatch')
-  # take maximum correlations for duplicated genes and delete 
+  
+  # determine the indices of all duplicated observations 
   duplicate.idcs <- which(duplicated(node.names))
   duplicate.names <- node.names[duplicate.idcs]
   matchName <- function(target, x) return(which(x == target))
   duplicates <- lapply(duplicate.names, matchName, x=node.names)
 
+
+  # take maximum absolute correlation across all replicates
   mergeMat <- function(x, idcs) {
     merged <- mergeMax(x[, idcs])
     x[idcs, ] <- matrix(rep(merged, length(idcs)), ncol=ncol(x), byrow=TRUE)
@@ -93,6 +120,8 @@ mergeDuplicates <- function(cor.mat, node.names) {
   for (i in 1:length(duplicates)) {
     cor.mat <- mergeMat(cor.mat, duplicates[[i]])
   }
+  
+  # remove duplicated observations
   idcs2remove <- unlist(sapply(duplicates, '[', -1))
   cor.mat <- cor.mat[-idcs2remove, -idcs2remove] 
   rownames(cor.mat) <- node.names[-idcs2remove]
@@ -100,13 +129,23 @@ mergeDuplicates <- function(cor.mat, node.names) {
   return(cor.mat)
 }
 
-spectralVectors <- function(cors, threshold, n.eigen) {
+spectralPreprocess <- function(cor.mat, threshold, n.eigen) {
+
+  # Calculate the spectral decomposition of the normalized Laplacian for a
+  # correlation matrix, where adjacency is determined by thresholding
+  # correlations at a specific quantile
+  # args:
+  #  cor.mat: a matrix of correlations
+  #  threshold: a numeric value between 0 and 1 specifying the quantile to
+  #   set adjacency at
+  #  n.eigen: the number of eigenvectors to return, starting with n-1 and
+  #  working backwards
 
   # determine threhsold value based on wuantiles of correlation matrix
-  qt.threshold <- getQtThreshold(cors, threshold) 
+  qt.threshold <- getQtThreshold(cor.mat, threshold) 
 
   # calculate adjacency and normalizing matrices
-  adjacency <- cors
+  adjacency <- cor.mat
   diag(adjacency) <- 0
   adjacency[adjacency <= qt.threshold[1] | adjacency >= qt.threshold[2]] <- 1
   adjacency[adjacency != 1] <- 0
@@ -116,7 +155,7 @@ spectralVectors <- function(cors, threshold, n.eigen) {
   col.sums.sqrt <- sqrt(col.sums)
   d.sqrt <- col.sums.sqrt * diag(n)
 
-  # remove indices with no neighbors
+  # remove indices with no neighbors in the adjacency matrix
   idcs2remove <- which(colSums(d.sqrt == 0) == n)
   if (length(idcs2remove) != 0) {
     d.sqrt <- d.sqrt[-idcs2remove, -idcs2remove]
@@ -126,23 +165,76 @@ spectralVectors <- function(cors, threshold, n.eigen) {
                              
   L <- diag(n) - solve(d.sqrt) %*% adjacency %*% solve(d.sqrt)
   e <- eigen(L)              
-
   spectral.vectors <- matrix(e$vectors[,(n-n.eigen):(n-1)], nrow=n)
   
   # add back removed observations with value of 0
   if (length(idcs2remove) != 0) {
-    temp <- numeric(nrow(cors))
+    temp <- numeric(nrow(cor.mat))
     temp[-idcs2remove] <- spectral.vectors
-    spectral.vectors <- matrix(temp, nrow=nrow(cors))
+    spectral.vectors <- matrix(temp, nrow=nrow(cor.mat))
   }
-  rownames(spectral.vectors) <- rownames(cors)
+  rownames(spectral.vectors) <- rownames(cor.mat)
   return(list(sv=spectral.vectors, e=e$values))
 }
 
-getLocalModules <- function(cor.list, thrsh=0.25, n.eigen=1) {
+spectralSplit <- function(cor.list, min.size, max.size, qt.threshold=0.25) { 
 
+  # Recursively split graph until cluster sizes are below a specified value.
+  # Stop splitting clusters if they fall below a certain size
+  # args:
+  #  cor.list: a list of correlation matrices, should be length one if trying to
+  #   split a single network
+  #  min.size: integer that determines when to stop splitting a given cluster
+  #  max.size: integer that determines when to exit the function. Cuts will
+  #   continue until all clusters are below max.size 
+  # qt.threshold: a numeric value between 0 and 1 specifying the quantile to
+  #   set adjacency at
   set.seed(47)
-  spectral.outputs <- lapply(cor.list, spectralVectors, threshold=thrsh, n.eigen=n.eigen)
+  sv <- lapply(cor.list, function(c) spectralPreprocess(c, threshold=qt.threshold, 1)$sv)
+  clusterVectors <- function(v) {
+    ifelse(length(v) > min.size, kmeans(v, center=2, nstart=10)$cluster, rep(1, length(v)))
+  }
+  clusters <- lapply(sv, clusterVectors)
+  genes <- lapply(cor.list, rownames)
+  
+  splitGenes <- function(clusters, gene.names) {
+    lapply(1:length(unique(clusters)), function(c) gene.names[clusters==c])
+  }
+  gene.clusters <- mapply(splitGenes, clusters, genes, SIMPLIFY=FALSE)
+  gene.clusters <- unlist(gene.clusters, recursive=FALSE)
+
+  splitCors <- function(clusters, cor.mat) {
+    lapply(1:length(unique(clusters)), function(c) as.matrix(cors[clusters==c, clusters==c]))
+  }
+  cor.list <- mapply(splitCors, clusters, cor.list, SIMPLIFY=FALSE)
+  cor.list <- unlist(cor.list, recursive=FALSE)
+
+  getClusterSizes <- function(clusters) {
+    sapply(1:length(unique(clusters)), function(c) sum(clusters==c))
+  }
+  cluster.sizes <- sapply(clusters, getClusterSizes) 
+  cluster.sizes <- unlist(cluster.sizes)
+
+  if (!all(cluster.sizes < max.size)) {
+    return(spectralSplit(cor.list, min.size, max.size, qt.threshold))
+  } else {
+    return(gene.clusters)
+  }
+}
+
+
+
+
+getLocalModules <- function(cor.list, threshold=0.25) {
+
+  # Determine modules that are consistent across multiple principle patterns
+  # args:
+  #  cor.list: a list of correlation matrices, typically determined from
+  #   multiple pp
+  # threhold: a numeric value between 0 and 1 specifying the quantile to
+  #   set adjacency at
+  set.seed(47)
+  spectral.outputs <- lapply(cor.list, spectralPreprocess, threshold=threshold, n.eigen=1)
   spectral.vectors <- sapply(spectral.outputs, '[', 'sv')
   spectral.clustering <- lapply(spectral.vectors, kmeans, center=2, nstart=10)
   spectral.clusters <- sapply(spectral.clustering, '[', 'cluster')
@@ -177,26 +269,26 @@ getLocalModules <- function(cor.list, thrsh=0.25, n.eigen=1) {
   return(list(mod=modules, mat=module.mat, genes=jointly.expressed))
 }
 
-subsetNetwork <- function(cors, genes) {
+subsetNetwork <- function(cor.mat, genes) {
 
-  # subset network to include only observations specified by genes
-  cor.names <- rownames(cors)
+  # Subset a correlation matrix to include only observations specified by genes
+  cor.names <- rownames(cor.mat)
   gene.idcs <- cor.names %in% genes
-  return(cors[gene.idcs, gene.idcs])
+  return(cor.mat[gene.idcs, gene.idcs])
 }
 
-plotCorGraph <- function(cors, threshold=NULL, qt.threshold=0.5, scale=0.5) {
+plotCorGraph <- function(cor.mat, threshold=NULL, qt.threshold=0.5, scale=0.5) {
 
   
   if (is.null(threshold)) {
-    threshold <- getQtThreshold(cors, qt.threshold) 
+    threshold <- getQtThreshold(cor.mat, qt.threshold) 
   }
   # remove edges for correlations below quantile threshold
-  diag(cors) <- 0
-  cors[cors > threshold[1] & cors < threshold[2]] <- 0
+  diag(cor.mat) <- 0
+  cor.mat[cors > threshold[1] & cors < threshold[2]] <- 0
 
-  if (! all(cors == 0)) {
-    graph <- graph.adjacency(cors, mode='lower', weighted=TRUE)
+  if (! all(cor.mat == 0)) {
+    graph <- graph.adjacency(cor.mat, mode='lower', weighted=TRUE)
     edge.sign <- sign(E(graph)$weight)
     edge.weight <- abs(E(graph)$weight)
     E(graph)$color <- ifelse(edge.sign > 0, 'green', 'red')
@@ -209,10 +301,15 @@ plotCorGraph <- function(cors, threshold=NULL, qt.threshold=0.5, scale=0.5) {
   }
 }
 
-getQtThreshold <- function(cors, qt.threshold) {
+getQtThreshold <- function(cor.mat, qt.threshold) {
+
+  # Calculate a specified quantile for a correlation matrix
+  # args:
+  #  cor.mat: a matrix of correlations
+  #  qt.threshold: a numeric value between 0 and 1 specifying the quantile
 
   qt.threshold <- max(qt.threshold, 1-qt.threshold)
-  cor.vector <- cors[upper.tri(cors, diag=FALSE)]
+  cor.vector <- cor.mat[upper.tri(cors, diag=FALSE)]
   threshold <- quantile(cor.vector, c(1-qt.threshold, qt.threshold))
   return(threshold)
 }

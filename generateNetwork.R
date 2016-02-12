@@ -54,7 +54,7 @@ for (i in 1:length(pp.centers)) {
 # Look at hindgut pp networks
 cor.list <- local.correlation.mats[1:3]
 threshold <- sapply(cor.list, getQtThreshold, qt.threshold=0.05)
-threshold <- c(min(thresholds[1,]), max(thresholds[2,]))
+threshold <- c(min(threshold[1,]), max(threshold[2,]))
 modules <- getLocalModules(cor.list)
 
 network.subsets <- lapply(cor.list, subsetNetwork, genes=modules$genes)
