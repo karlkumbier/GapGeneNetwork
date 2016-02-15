@@ -142,42 +142,46 @@ spectralPreprocess <- function(cor.mat, threshold, n.eigen) {
   #  working backwards
 
   # determine threhsold value based on wuantiles of correlation matrix
-  qt.threshold <- getQtThreshold(cor.mat, threshold) 
+  if (nrow(cor.mat) == 1) {
+    return(list(sv=1, e=1))
+  } else{
+    qt.threshold <- getQtThreshold(cor.mat, threshold) 
 
-  # calculate adjacency and normalizing matrices
-  adjacency <- cor.mat
-  diag(adjacency) <- 0
-  adjacency[adjacency <= qt.threshold[1] | adjacency >= qt.threshold[2]] <- 1
-  adjacency[adjacency != 1] <- 0
+    # calculate adjacency and normalizing matrices
+    adjacency <- cor.mat
+    diag(adjacency) <- 0
+    adjacency[adjacency <= qt.threshold[1] | adjacency >= qt.threshold[2]] <- 1
+    adjacency[adjacency != 1] <- 0
 
-  n <- nrow(adjacency)
-  col.sums <- colSums(adjacency)
-  col.sums.sqrt <- sqrt(col.sums)
-  d.sqrt <- col.sums.sqrt * diag(n)
+    n <- nrow(adjacency)
+    col.sums <- colSums(adjacency)
+    col.sums.sqrt <- sqrt(col.sums)
+    d.sqrt <- col.sums.sqrt * diag(n)
 
-  # remove indices with no neighbors in the adjacency matrix
-  idcs2remove <- which(colSums(d.sqrt == 0) == n)
-  if (length(idcs2remove) != 0) {
-    d.sqrt <- d.sqrt[-idcs2remove, -idcs2remove]
-    adjacency <- adjacency[-idcs2remove, -idcs2remove]
-    n <- n - length(idcs2remove)
-  }                          
-                             
-  L <- diag(n) - solve(d.sqrt) %*% adjacency %*% solve(d.sqrt)
-  e <- eigen(L)              
-  spectral.vectors <- matrix(e$vectors[,(n-n.eigen):(n-1)], nrow=n)
-  
-  # add back removed observations with value of 0
-  if (length(idcs2remove) != 0) {
-    temp <- numeric(nrow(cor.mat))
-    temp[-idcs2remove] <- spectral.vectors
-    spectral.vectors <- matrix(temp, nrow=nrow(cor.mat))
-  }
-  rownames(spectral.vectors) <- rownames(cor.mat)
-  return(list(sv=spectral.vectors, e=e$values))
+    # remove indices with no neighbors in the adjacency matrix
+    idcs2remove <- which(colSums(d.sqrt == 0) == n)
+    if (length(idcs2remove) != 0) {
+      d.sqrt <- d.sqrt[-idcs2remove, -idcs2remove]
+      adjacency <- adjacency[-idcs2remove, -idcs2remove]
+      n <- n - length(idcs2remove)
+    }                          
+                               
+    L <- diag(n) - solve(d.sqrt) %*% adjacency %*% solve(d.sqrt)
+    e <- eigen(L)              
+    spectral.vectors <- matrix(e$vectors[,(n-n.eigen):(n-1)], nrow=n)
+    
+    # add back removed observations with value of 0
+    if (length(idcs2remove) != 0) {
+      temp <- numeric(nrow(cor.mat))
+      temp[-idcs2remove] <- spectral.vectors
+      spectral.vectors <- matrix(temp, nrow=nrow(cor.mat))
+    }
+    rownames(spectral.vectors) <- rownames(cor.mat)
+    return(list(sv=spectral.vectors, e=e$values))
+    }
 }
 
-spectralSplit <- function(cor.list, min.size, max.size, qt.threshold=0.25) { 
+spectralSplit <- function(cor.list, n.splits=1, qt.threshold=0.25) { 
 
   # Recursively split graph until cluster sizes are below a specified value.
   # Stop splitting clusters if they fall below a certain size
@@ -191,8 +195,11 @@ spectralSplit <- function(cor.list, min.size, max.size, qt.threshold=0.25) {
   #   set adjacency at
   set.seed(47)
   sv <- lapply(cor.list, function(c) spectralPreprocess(c, threshold=qt.threshold, 1)$sv)
+   
   clusterVectors <- function(v) {
-    ifelse(length(v) > min.size, kmeans(v, center=2, nstart=10)$cluster, rep(1, length(v)))
+    ifelse(length(v) > 2, 
+           return(kmeans(v, center=2, nstart=10)$cluster), 
+           return(rep(1, length(v))))
   }
   clusters <- lapply(sv, clusterVectors)
   genes <- lapply(cor.list, rownames)
@@ -203,28 +210,60 @@ spectralSplit <- function(cor.list, min.size, max.size, qt.threshold=0.25) {
   gene.clusters <- mapply(splitGenes, clusters, genes, SIMPLIFY=FALSE)
   gene.clusters <- unlist(gene.clusters, recursive=FALSE)
 
-  splitCors <- function(clusters, cor.mat) {
+  splitCors <- function(clusters, cors) {
     lapply(1:length(unique(clusters)), function(c) as.matrix(cors[clusters==c, clusters==c]))
   }
   cor.list <- mapply(splitCors, clusters, cor.list, SIMPLIFY=FALSE)
   cor.list <- unlist(cor.list, recursive=FALSE)
 
-  getClusterSizes <- function(clusters) {
-    sapply(1:length(unique(clusters)), function(c) sum(clusters==c))
-  }
-  cluster.sizes <- sapply(clusters, getClusterSizes) 
-  cluster.sizes <- unlist(cluster.sizes)
-
-  if (!all(cluster.sizes < max.size)) {
-    return(spectralSplit(cor.list, min.size, max.size, qt.threshold))
+  if (length(cor.list) < 2 ^ n.splits) {
+    return(spectralSplit(cor.list, n.splits, qt.threshold))
   } else {
     return(gene.clusters)
   }
 }
 
+geneSimilarity <- function(cluster.tree, genes) {
+
+  # TODO: gene sometimes not appearing in cluster tree after selection, fix this
+  gene.pairs <- combn(genes, 2, simplify=FALSE)
+
+  # determine which trees contain both genes in a given pair
+  pairInTree <- function(g1, g2, tree) g1 %in% unlist(tree) & g2 %in% unlist(tree)
+  containsPair <- function(pair) which(sapply(cluster.tree, pairInTree, g1=pair[1], g2=pair[2]))
+  pair.trees <- lapply(gene.pairs, containsPair) 
+  
+  # for a given pair, determine the proportion of times the pairs occur in the
+  # same cluster
+  sameLeaf <- function(pair, tree) {
+    idx1 <- which(sapply(tree, function(t) pair[1] %in% t))
+    idx2 <- which(sapply(tree, function(t) pair[2] %in% t))
+    return(idx1 == idx2)
+  }
+  sameLeafProportion <- function(pair, shared.idcs) {
+    joint.trees <- cluster.tree[shared.idcs]
+    proportion <- mean(sapply(joint.trees, sameLeaf, pair=pair))
+    return(proportion)
+  }
+  pair.proportions <- mapply(sameLeafProportion, pair=gene.pairs, shared.idcs=pair.trees) 
+
+  similarity.matrix <- matrix(0, nrow=length(genes), ncol=length(genes)) 
+  rownames(similarity.matrix) <- genes
+  colnames(similarity.matrix) <- genes
+ for (i in 1:length(gene.pairs)) {
+    sim <- pair.proportions[i]
+    g1 <- gene.pairs[[i]][1]
+    g2 <- gene.pairs[[i]][2]
+    similarity.matrix[g1, g2] <- sim
+    similarity.matrix[g2, g1] <- sim
+  }
+  return(similarity.matrix)
+}
+
+    
 
 
-
+  
 getLocalModules <- function(cor.list, threshold=0.25) {
 
   # Determine modules that are consistent across multiple principle patterns
@@ -309,7 +348,7 @@ getQtThreshold <- function(cor.mat, qt.threshold) {
   #  qt.threshold: a numeric value between 0 and 1 specifying the quantile
 
   qt.threshold <- max(qt.threshold, 1-qt.threshold)
-  cor.vector <- cor.mat[upper.tri(cors, diag=FALSE)]
+  cor.vector <- cor.mat[upper.tri(cor.mat, diag=FALSE)]
   threshold <- quantile(cor.vector, c(1-qt.threshold, qt.threshold))
   return(threshold)
 }
