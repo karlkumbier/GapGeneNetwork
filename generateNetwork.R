@@ -93,8 +93,9 @@ set.seed(47)
 n.trees <- 50
 node.samples <- replicate(n.trees, unique(sample(1:n.nodes, replace=TRUE)), simplify=FALSE)
 cor.samples <- lapply(node.samples, function(s) list(cors.pp7[s, s]))
-cluster.subsamples <- lapply(cor.samples, spectralSplit, n.splits=3, qt.threshold=0.3)
-gene.similarities <- geneSimilarity(cluster.subsamples, rownames(cors.pp7))
+cluster.subsamples <- lapply(cor.samples, spectralSplit, n.splits=3, qt.threshold=0.4)
+gene.similarity.output <- geneSimilarity(cluster.subsamples, rownames(cors.pp7))
+gene.similarities <- generateSimilarityMat(gene.similarity.output, rownames(cors.pp7))
 
 # look at heatmaps for correlations and spectral clustering
 library(gplots)
@@ -121,21 +122,22 @@ h.cluster <- hclust(gene.dists)
 n.cluster <- 3
 clusters <- cutree(h.cluster, k=n.cluster)
 genes <- rownames(cors.pp7)
-
 cluster.genes <- lapply(1:n.cluster, function(c) genes[clusters==c])
 
-#removeEmpty <- function(data) {
-#  zero.cols <- which(colSums(data==0) == nrow(data))
-#  return(data[,-zero.cols])
-#}
+# examine four way interactions in sub cluster
+interactions4 <- geneSimilarity(cluster.subsamples, cluster.genes[[2]], inter.number=4)
+# look at top 5
+top5.idcs <- order(interactions4$set.proportions, decreasing=TRUE)[1:5]
+top5 <- interactions4$gene.sets[top5.idcs]
 
+
+# plot clusters against annotation data
 cols <- c('#ff3333', '#66d9ff')
-cluster.annot <- lapply(cluster.genes, function(c) {
+cluster.annot <- lapply(top5, function(c) {
   geneExpSym[annotated.genes %in% c, ]
 })
-#cluster.annot <- lapply(cluster.annot, removeEmpty)
 
-par(mfrow=c(3, 1))
+par(mfrow=c(5, 1))
 par(mar=rep(0, 4))
 image(t(cluster.annot[[1]]), col=cols)
 image(t(cluster.annot[[2]]), col=cols)

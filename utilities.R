@@ -223,46 +223,49 @@ spectralSplit <- function(cor.list, n.splits=1, qt.threshold=0.25) {
   }
 }
 
-geneSimilarity <- function(cluster.tree, genes) {
+geneSimilarity <- function(cluster.tree, genes, set.size=2) {
 
   # TODO: gene sometimes not appearing in cluster tree after selection, fix this
-  gene.pairs <- combn(genes, 2, simplify=FALSE)
+  gene.set <- combn(genes, set.size, simplify=FALSE)
 
   # determine which trees contain both genes in a given pair
-  pairInTree <- function(g1, g2, tree) g1 %in% unlist(tree) & g2 %in% unlist(tree)
-  containsPair <- function(pair) which(sapply(cluster.tree, pairInTree, g1=pair[1], g2=pair[2]))
-  pair.trees <- lapply(gene.pairs, containsPair) 
+  setInTree <- function(set, tree) return(all(set %in% unlist(tree))
+  containsSet <- function(set) which(sapply(cluster.tree, setInTree, set=set))
+  set.trees <- lapply(gene.set, containsSet) 
   
   # for a given pair, determine the proportion of times the pairs occur in the
   # same cluster
-  sameLeaf <- function(pair, tree) {
-    idx1 <- which(sapply(tree, function(t) pair[1] %in% t))
-    idx2 <- which(sapply(tree, function(t) pair[2] %in% t))
-    return(idx1 == idx2)
+  sameLeaf <- function(set, tree) {
+    idcs <- sapply(set, function(s) {
+              which(sapply(tree, function(t) s %in% t))
+    })
+    return(length(unique(idcs)) == 1)
   }
-  sameLeafProportion <- function(pair, shared.idcs) {
+  sameLeafProportion <- function(set, shared.idcs) {
     joint.trees <- cluster.tree[shared.idcs]
-    proportion <- mean(sapply(joint.trees, sameLeaf, pair=pair))
+    proportion <- mean(sapply(joint.trees, sameLeaf, set=set))
     return(proportion)
   }
-  pair.proportions <- mapply(sameLeafProportion, pair=gene.pairs, shared.idcs=pair.trees) 
+  set.proportions <- mapply(sameLeafProportion, set=gene.set, shared.idcs=pair.trees) 
 
+  return(list(gene.set=gene.set, set.prop=set.proportions))
+}
+
+ 
+generateSimilarityMatrix <- function(pair.list, pair.similarity, genes) {
+   
   similarity.matrix <- matrix(0, nrow=length(genes), ncol=length(genes)) 
-  rownames(similarity.matrix) <- genes
+  rownames(similarity.matrix) <- genes         
   colnames(similarity.matrix) <- genes
- for (i in 1:length(gene.pairs)) {
-    sim <- pair.proportions[i]
-    g1 <- gene.pairs[[i]][1]
-    g2 <- gene.pairs[[i]][2]
+  for (i in 1:length(pair.list)) {
+    sim <- pair.similarity[i]
+    g1 <- pair.list[[i]][1]
+    g2 <- pair.list[[i]][2]
     similarity.matrix[g1, g2] <- sim
     similarity.matrix[g2, g1] <- sim
   }
   return(similarity.matrix)
 }
-
-    
-
-
   
 getLocalModules <- function(cor.list, threshold=0.25) {
 
@@ -310,7 +313,6 @@ getLocalModules <- function(cor.list, threshold=0.25) {
 
 subsetNetwork <- function(cor.mat, genes) {
 
-  # Subset a correlation matrix to include only observations specified by genes
   cor.names <- rownames(cor.mat)
   gene.idcs <- cor.names %in% genes
   return(cor.mat[gene.idcs, gene.idcs])
