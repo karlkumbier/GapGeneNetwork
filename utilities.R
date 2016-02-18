@@ -229,7 +229,7 @@ geneSimilarity <- function(cluster.tree, genes, set.size=2) {
   gene.set <- combn(genes, set.size, simplify=FALSE)
 
   # determine which trees contain both genes in a given pair
-  setInTree <- function(set, tree) return(all(set %in% unlist(tree))
+  setInTree <- function(set, tree) return(all(set %in% unlist(tree)))
   containsSet <- function(set) which(sapply(cluster.tree, setInTree, set=set))
   set.trees <- lapply(gene.set, containsSet) 
   
@@ -246,7 +246,7 @@ geneSimilarity <- function(cluster.tree, genes, set.size=2) {
     proportion <- mean(sapply(joint.trees, sameLeaf, set=set))
     return(proportion)
   }
-  set.proportions <- mapply(sameLeafProportion, set=gene.set, shared.idcs=pair.trees) 
+  set.proportions <- mapply(sameLeafProportion, set=gene.set, shared.idcs=set.trees) 
 
   return(list(gene.set=gene.set, set.prop=set.proportions))
 }
