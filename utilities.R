@@ -252,8 +252,10 @@ geneSimilarity <- function(cluster.tree, genes, set.size=2) {
 }
 
  
-generateSimilarityMatrix <- function(pair.list, pair.similarity, genes) {
-   
+generateSimilarityMatrix <- function(gene.sim, genes) {
+  
+  pair.list <- gene.sim$gene.set
+  pair.similarity <- gene.sim$set.prop 
   similarity.matrix <- matrix(0, nrow=length(genes), ncol=length(genes)) 
   rownames(similarity.matrix) <- genes         
   colnames(similarity.matrix) <- genes
@@ -321,12 +323,12 @@ subsetNetwork <- function(cor.mat, genes) {
 plotCorGraph <- function(cor.mat, threshold=NULL, qt.threshold=0.5, scale=0.5) {
 
   
-  if (is.null(threshold)) {
-    threshold <- getQtThreshold(cor.mat, qt.threshold) 
-  }
-  # remove edges for correlations below quantile threshold
-  diag(cor.mat) <- 0
-  cor.mat[cors > threshold[1] & cors < threshold[2]] <- 0
+  #if (is.null(threshold)) {
+  #  threshold <- getQtThreshold(cor.mat, qt.threshold) 
+  #}
+  ## remove edges for correlations below quantile threshold
+  #diag(cor.mat) <- 0
+  #cor.mat[cor.mat > threshold[1] & cors < threshold[2]] <- 0
 
   if (! all(cor.mat == 0)) {
     graph <- graph.adjacency(cor.mat, mode='lower', weighted=TRUE)
@@ -334,9 +336,9 @@ plotCorGraph <- function(cor.mat, threshold=NULL, qt.threshold=0.5, scale=0.5) {
     edge.weight <- abs(E(graph)$weight)
     E(graph)$color <- ifelse(edge.sign > 0, 'green', 'red')
 
-    graph.layout <- layout.circle(graph)
-    plot(graph, edge.width=exp(scale * edge.weight) / scale, vertex.label.cex=0.5,
-         layout=graph.layout)
+    #graph.layout <- layout.circle(graph)
+    plot(graph, edge.width=exp(scale * edge.weight) / scale, vertex.label.cex=0.5)
+         #layout=graph.layout)
   } else{
     warning('no interactions at specified threshold')
   }
@@ -355,16 +357,20 @@ getQtThreshold <- function(cor.mat, qt.threshold) {
   return(threshold)
 }
 
-forceSignAgreement <- function(networks) {
+plotHeatmap <- function(sim.mat, threshold=NULL, cex=1) {
 
-  # ensure that sign agrees for all pairwise interactions in all correlation
-  # matrices of networks by setting those that disagree to 0
-  cor.signs <- sapply(networks, sign)
-  same.sign <- apply(cor.signs, 1, function(r) length(unique(r)) == 1)
-  matchedSigns <- function(mat, same.sign) {
-      mat[!same.sign] <- 0
-    return(mat)
-  } 
-  networks <- lapply(network.subsets, matchedSigns, same.sign=same.sign)
-  return(networks)
+  if (!is.null(threshold)) {
+    sim.mat[sim.mat > threshold[1] & sim.mat < threshold[2]] <- 0
+  }
+  heatmap.2(abs(sim.mat), dendrogram="none", trace="none", key=FALSE, 
+                lhei=c(1,9), lwid=c(1, 9), cexRow=cex, cexCol=cex)
+}
+
+generateNoisyCor <- function(cor.mat, eps) {
+
+  n <- nrow(cor.mat)
+  noise <- matrix(rnorm(n ^ 2), nrow=n)
+  noise.cor <- cor(noise) * eps
+  diag(noise.cor) <- 0
+  return(cor.mat + noise.cor)
 }

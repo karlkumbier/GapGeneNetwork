@@ -11,14 +11,6 @@ cols <- brewer.pal(11, 'RdYlBu')
 n.dict <- ncol(Dstd) - 1
 dict.mat <- array(0, c(16, 32, n.dict))
 
-#for (i in 1:n.dict) {
-#  dict.mat[,,i] <- generateImage(template, Dstd[,i])
-#  dev.new()
-#  im2plot <- t(dict.mat[,,i])
-#  im2plot <- im2plot[,seq(ncol(im2plot), 1, by=-1)]
-#  image(im2plot)
-#}
-
 # Local network analysis for transcription factors expressed in pp1 and pp2
 tf.data <- X[, tfInd]
 tf.alphas <- alpha[, tfInd]
@@ -50,95 +42,73 @@ for (i in 1:length(pp.centers)) {
   local.correlation.mats[[i]] <- local.correlation
 }
 
-# Look at spectral clustering for pp7 (based on CG13894 experiment)
-# Look at hindgut pp networks
-#cor.list <- local.correlation.mats[1:3]
-#threshold <- sapply(cor.list, getQtThreshold, qt.threshold=0.05)
-#threshold <- c(min(threshold[1,]), max(threshold[2,]))
-#modules <- getLocalModules(cor.list)
-#
-#network.subsets <- lapply(cor.list, subsetNetwork, genes=modules$genes)
-## only consider observations with the same sign across all pp
-##network.subsets <- forceSignAgreement(networkSubsets) 
-#
-#
-#setwd('./plots/hindgut')
-#for (i in 1:length(network.subsets)) {
-#
-#  pdf(paste0('localNetwork', i, '.pdf'))
-#  plotCorGraph(network.subsets[[i]], qt.threshold=0.025)
-#  dev.off()
-#}
-#
-#for (i in 1:length(modules$mod)) {
-#  mod <- modules$mod[[i]]
-#  if (length(mod) <= 1) next
-#  module.subsets <- lapply(network.subsets, subsetNetwork, genes=mod)
-#  for (j in 1:length(module.subsets)) {
-#
-#    pdf(paste0('moduleNetworkConstantThresh_m', i, '_pp', j, '.pdf'))
-#    plotCorGraph(module.subsets[[j]], qt.threshold=0.5, scale=1)
-#    dev.off()
-#  }
-#} 
-#
-## consider the module with gap genes
-#subset.network <- lapply(cor.list[1:2], subsetNetwork, genes=modules$mod[[4]]) 
-#subset.modules <- getLocalModules(subset.network)
-
-
 cors.pp7 <- local.correlation.mats[[3]]
 n.nodes <- nrow(cors.pp7)
 set.seed(47)
+
+# stability based analysis of spectral clustering: take subsets of nodes and
+# split resulting graphs using spectral clustering. How often do genes appear in
+# the same leaf nodes
 n.trees <- 50
-node.samples <- replicate(n.trees, unique(sample(1:n.nodes, replace=TRUE)), simplify=FALSE)
-cor.samples <- lapply(node.samples, function(s) list(cors.pp7[s, s]))
-cluster.subsamples <- lapply(cor.samples, spectralSplit, n.splits=3, qt.threshold=0.4)
+
+# stability through subsampling
+#node.samples <- replicate(n.trees, unique(sample(1:n.nodes, replace=TRUE)), simplify=FALSE)
+#cor.samples <- lapply(node.samples, function(s) list(cors.pp7[s, s])) # subsample
+
+#stability through noise
+set.seed(47)
+eps <- 0.05
+cor.samples <- lapply(1:n.trees, function(s) list(generateNoisyCor(cors.pp7, eps)))
+
+cluster.subsamples <- lapply(cor.samples, spectralSplit, n.splits=2, qt.threshold=0.25)
 gene.similarity.output <- geneSimilarity(cluster.subsamples, rownames(cors.pp7))
-gene.similarities <- generateSimilarityMat(gene.similarity.output, rownames(cors.pp7))
+gene.sim.mat <- generateSimilarityMatrix(gene.similarity.output, rownames(cors.pp7))
 
-# look at heatmaps for correlations and spectral clustering
+# Comparison of spectral clustering and correlation based results
 library(gplots)
-pdf('cor_clusters.pdf')
-heatmap.2(cors.pp7, dendrogram="col", trace="none", key=FALSE, cexRow=0.5, cexCol=0.5)
+diag(gene.sim.mat) <- 1
+plot.dir <- './corrlationComparison/'
+dir.create(plot.dir)
+
+pdf(paste0(plot.dir, 'localSpectral.pdf')) 
+plotHeatmap(gene.sim.mat)
 dev.off()
 
-pdf('cor_clusters_thrsh.pdf')
+pdf(paste0(plot.dir, 'localCor.pdf')) 
+plotHeatmap(cors.pp7)
+dev.off()
+
+pdf(paste0(plot.dir, 'localCor_90.pdf')) 
 thrsh <- getQtThreshold(cors.pp7, 0.9)
-cors.thrsh <- cors.pp7
-cors.thrsh[cors.thrsh > thrsh[1] & cors.thrsh < thrsh[2]] <- 0
-heatmap.2(cors.thrsh, dendrogram="col", trace="none", key=FALSE, cexRow=0.5, cexCol=0.5)
+plotHeatmap(cors.pp7, threshold=thrsh)
 dev.off()
 
-pdf('spectral_clusters.pdf')
-diag(gene.similarities) <- 1
-heatmap.2(gene.similarities, dendrogram="col", trace="none", key=FALSE, cexRow=0.5, cexCol=0.5)
+pdf(paste0(plot.dir, 'localCor_70.pdf'))  
+thrsh <- getQtThreshold(cors.pp7, 0.7)
+plotHeatmap(cors.pp7, threshold=thrsh)
 dev.off()
 
-load('geneExpSym.RData')
-annotated.genes <- rownames(geneExpSym)
-gene.dists <- dist(1 - gene.similarities)
-h.cluster <- hclust(gene.dists)
-n.cluster <- 3
-clusters <- cutree(h.cluster, k=n.cluster)
-genes <- rownames(cors.pp7)
-cluster.genes <- lapply(1:n.cluster, function(c) genes[clusters==c])
+# Comparison of global and local results
+global.cors <- cor(tf.data)
+global.cors <- mergeDuplicates(global.cors, tf.names)
 
-# examine four way interactions in sub cluster
-interactions4 <- geneSimilarity(cluster.subsamples, cluster.genes[[2]], inter.number=4)
-# look at top 5
-top5.idcs <- order(interactions4$set.proportions, decreasing=TRUE)[1:5]
-top5 <- interactions4$gene.sets[top5.idcs]
+pdf(paste0(plot.dir, 'globalCor.pdf')) 
+plotHeatmap(global.cors, cex=0.4)
+dev.off()
+
+pdf(paste0(plot.dir, 'globalCor_90.pdf')) 
+thrsh <- getQtThreshold(global.cors, 0.9)
+plotHeatmap(global.cors, threshold=thrsh, cex=0.4)
+dev.off()
+
+global.cors.thrsh <- global.cors
+global.cors.thrsh[global.cors > thrsh[1] & global.cors < thrsh[2]] <- 0
 
 
-# plot clusters against annotation data
-cols <- c('#ff3333', '#66d9ff')
-cluster.annot <- lapply(top5, function(c) {
-  geneExpSym[annotated.genes %in% c, ]
-})
+set.seed(47)
+eps <- 0.05
+cor.samples <- lapply(1:n.trees, function(s) list(generateNoisyCor(global.cors, eps)))
 
-par(mfrow=c(5, 1))
-par(mar=rep(0, 4))
-image(t(cluster.annot[[1]]), col=cols)
-image(t(cluster.annot[[2]]), col=cols)
-image(t(cluster.annot[[3]]), col=cols)
+cluster.subsamples <- lapply(cor.samples, spectralSplit, n.splits=2, qt.threshold=0.25)
+gene.similarity.output <- geneSimilarity(cluster.subsamples, rownames(global.cors))
+gene.sim.mat <- generateSimilarityMatrix(gene.similarity.output, rownames(global.cors))
