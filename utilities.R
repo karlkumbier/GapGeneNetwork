@@ -204,6 +204,10 @@ spectralSplit <- function(cor.list, n.splits=1, qt.threshold=0.25) {
   clusters <- lapply(sv, clusterVectors)
   genes <- lapply(cor.list, rownames)
   
+  adj.list <- lapply(cor.list, function(c) generateAdjacency(c[[1]], threshold=qt.threshold))
+  mod.new <- mapply(function(a, c) modularity(a, c), adj.list, clusters)
+  print(mod)
+
   splitGenes <- function(clusters, gene.names) {
     lapply(1:length(unique(clusters)), function(c) gene.names[clusters==c])
   }
@@ -373,4 +377,31 @@ generateNoisyCor <- function(cor.mat, eps) {
   noise.cor <- cor(noise) * eps
   diag(noise.cor) <- 0
   return(cor.mat + noise.cor)
+}
+
+generateAdjacency <- function(cor.mat, threshold) {
+
+  thrsh <- getQtThreshold(cor.mat, threshold)
+  cor.mat[cor.mat >= thrsh[1] & cor.mat <= thrsh[2]] <- 0
+  cor.mat[cor.mat != 0] <- 1
+  diag(cor.mat) <- 0
+  return(cor.mat)
+}
+
+modularity <- function(adjacency, label) {
+
+  lab.vals <- unique(label)
+  if (length(lab.vals) > 2) stop('maximum of two classes')
+  lab1.idcs <- which(label == lab.vals[1])
+  lab2.idcs <- which(label == lab.vals[2])
+  label[lab1.idcs] <- 1
+  label[lab2.idcs] <- -1
+  m <- sum(adjacency) 
+  degree <- rowSums(adjacency)
+  joint.degree <- degree %*% t(degree) / (2 * m)
+  joint.label <- label %*% t(label)
+  joint.label[joint.label == -1] <- 0
+  pw.modularity <- (adjacency - joint.degree) * joint.label
+  mod <- (1 / (2 * m)) * sum(pw.modularity)#[upper.tri(pw.modularity, diag=FALSE)])
+  return(mod)
 }
