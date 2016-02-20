@@ -179,7 +179,7 @@ mergeDuplicates <- function(cor.mat, node.names) {
 }
 
 # Functions for spectral clustering of gene networks
-laplacianSVD <- function(cor.mat, thresh, n.eigen) {
+laplacianSVD <- function(cor.mat, qt.thresh, n.eigen=1) {
 
   # Calculate the spectral decomposition of the normalized Laplacian for a
   # correlation matrix, where adjacency is determined by threshing
@@ -197,8 +197,11 @@ laplacianSVD <- function(cor.mat, thresh, n.eigen) {
   } else{
 
     # calculate adjacency and normalizing matrices
-    adjacency <- generateAdjacency(cor.mat, thresh)
+    adjacency <- generateAdjacency(cor.mat, qt.thresh)
+    
     n <- nrow(adjacency)
+    if (all(adjacency == 0)) return(rep(0, n))
+
     col.sums <- colSums(adjacency)
     col.sums.sqrt <- sqrt(col.sums)
     d.sqrt <- col.sums.sqrt * diag(n)
@@ -222,11 +225,11 @@ laplacianSVD <- function(cor.mat, thresh, n.eigen) {
       e.vectors <- matrix(temp, nrow=nrow(cor.mat))
     }
     rownames(e.vectors) <- rownames(cor.mat)
-    return(vec)
+    return(e.vectors)
     }
 }
 
-spectralSplit <- function(cor.list, n.splits=1, qt.thresh=0.25) { 
+spectralSplit <- function(cor.list, qt.thresh=0.25) { 
 
   # Recursively split graph until cluster sizes are below a specified value.
   # Stop splitting clusters if they fall below a certain size
@@ -242,7 +245,7 @@ spectralSplit <- function(cor.list, n.splits=1, qt.thresh=0.25) {
 
   # split laplacian eigenvector into two groups and determine modularity of the
   # clustering
-  vec <- lapply(cor.list, laplacianSVD, thresh=qt.thresh, n.eigen=1)  
+  vec <- lapply(cor.list, laplacianSVD, qt.thresh=qt.thresh)  
   clusterVectors <- function(v) {
     if(length(v) > 2){ 
       return(kmeans(v, center=2, nstart=10)$cluster)
@@ -252,10 +255,10 @@ spectralSplit <- function(cor.list, n.splits=1, qt.thresh=0.25) {
       return(1)
     }
   }
-  clusters <- lapply(sv, clusterVectors)  
-  adj.list <- lapply(cor.list, function(c) generateAdjacency(c, thresh=qt.thresh))
+  clusters <- lapply(vec, clusterVectors)  
+  adj.list <- lapply(cor.list, function(c) generateAdjacency(c, qt.thresh=qt.thresh))
   mod <- mapply(function(a, c) modularity(a, c), adj.list, clusters)
-   
+  # TODO: gene sometimes not appearing in cluster tree after selection, fix this
   # sif modularity is positive, split genes according to spectral clustering
   genes <- lapply(cor.list, rownames)
   splitGenes <- function(clusters, gene.names, mod) {
@@ -265,8 +268,9 @@ spectralSplit <- function(cor.list, n.splits=1, qt.thresh=0.25) {
       lapply(1:n.clusters, function(c) gene.names[clusters==c])
     } else {
       list(gene.names)
+    }
   }
-  gene.clusters <- mapply(splitGenes, clusters, genes, cors, SIMPLIFY=FALSE)
+  gene.clusters <- mapply(splitGenes, clusters, genes, mod, SIMPLIFY=FALSE)
   gene.clusters <- unlist(gene.clusters, recursive=FALSE)
 
   # if modularity is positive, split correlation matrices, else return the
@@ -378,7 +382,7 @@ generateAdjacency <- function(cor.mat, qt.thresh) {
 
   # threshold a correlation matrix at specified quantile and generate
   # corresponding adjacency matrix
-  thresh <- getQtThreshold(cor.mat, qtthresh)
+  thresh <- getQtThreshold(cor.mat, qt.thresh)
   cor.mat[cor.mat >= thresh[1] & cor.mat <= thresh[2]] <- 0
   cor.mat[cor.mat != 0] <- 1
   diag(cor.mat) <- 0
@@ -406,8 +410,7 @@ modularity <- function(adjacency, label) {
 }
 
 getGeneNetwork <- function(cor.mat, thresh, genes) {
- 
-   
+    
   adjacency <- generateAdjacency(cor.mat, thresh=thresh)
   adjacency <- adjacency * sign(cor.mat)
   gene.idcs <- which(rownames(adjacency) %in% genes)
