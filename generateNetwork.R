@@ -1,6 +1,5 @@
 library(R.matlab)
 library(RColorBrewer)
-library(pcalg)
 library(igraph)
 source('utilities.R')
 load('dictFitDataNLS.RData')
@@ -57,12 +56,18 @@ n.trees <- 50
 
 #stability through noise
 set.seed(47)
-eps <- 0.05
+eps <- 1
 cor.samples <- lapply(1:n.trees, function(s) list(generateNoisyCor(cors.pp7, eps)))
 
-cluster.subsamples <- lapply(cor.samples, spectralSplit, n.splits=2, qt.threshold=0.25)
+cluster.subsamples <- lapply(cor.samples, spectralSplit, n.splits=3, qt.threshold=0.25)
 gene.similarity.output <- geneSimilarity(cluster.subsamples, rownames(cors.pp7))
 gene.sim.mat <- generateSimilarityMatrix(gene.similarity.output, rownames(cors.pp7))
+
+h.cluster <- hclust(dist(1-gene.sim.mat))
+clusters <- cutree(h.cluster, k=4)
+gene.clusters <- rownames(cors.pp7)[clusters == 2]
+cluster.subsamples <- lapply(cor.samples, spectralSplit, n.splits=2, qt.threshold=0.1)
+gene.sim.4 <- geneSimilarity(cluster.subsamples, gene.clusters,  set.size=4) 
 
 # Comparison of spectral clustering and correlation based results
 library(gplots)

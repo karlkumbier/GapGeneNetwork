@@ -177,7 +177,7 @@ spectralPreprocess <- function(cor.mat, threshold, n.eigen) {
       spectral.vectors <- matrix(temp, nrow=nrow(cor.mat))
     }
     rownames(spectral.vectors) <- rownames(cor.mat)
-    return(list(sv=spectral.vectors, e=e$values))
+    return(spectral.vectors)
     }
 }
 
@@ -194,33 +194,42 @@ spectralSplit <- function(cor.list, n.splits=1, qt.threshold=0.25) {
   # qt.threshold: a numeric value between 0 and 1 specifying the quantile to
   #   set adjacency at
   set.seed(47)
-  sv <- lapply(cor.list, function(c) spectralPreprocess(c, threshold=qt.threshold, 1)$sv)
+  sv <- lapply(cor.list, spectralPreprocess, threshold=qt.threshold, n.eigen=1)
    
   clusterVectors <- function(v) {
-    ifelse(length(v) > 2, 
-           return(kmeans(v, center=2, nstart=10)$cluster), 
-           return(rep(1, length(v))))
+    if(length(v) > 2){ 
+      return(kmeans(v, center=2, nstart=10)$cluster)
+    } else if (length(v) == 2) { 
+      return(c(1, 2))
+    } else {
+      return(1)
+    }
   }
   clusters <- lapply(sv, clusterVectors)
   genes <- lapply(cor.list, rownames)
   
-  adj.list <- lapply(cor.list, function(c) generateAdjacency(c[[1]], threshold=qt.threshold))
-  mod.new <- mapply(function(a, c) modularity(a, c), adj.list, clusters)
-  print(mod)
-
+  adj.list <- lapply(cor.list, function(c) generateAdjacency(c, threshold=qt.threshold))
+  mod <- mapply(function(a, c) modularity(a, c), adj.list, clusters)
   splitGenes <- function(clusters, gene.names) {
     lapply(1:length(unique(clusters)), function(c) gene.names[clusters==c])
   }
   gene.clusters <- mapply(splitGenes, clusters, genes, SIMPLIFY=FALSE)
   gene.clusters <- unlist(gene.clusters, recursive=FALSE)
 
-  splitCors <- function(clusters, cors) {
-    lapply(1:length(unique(clusters)), function(c) as.matrix(cors[clusters==c, clusters==c]))
+  # if modularity is positive, split correlation matrices
+  splitCors <- function(clusters, cors, mod) {
+    n.clusters <- length(unique(clusters))
+    if (mod > 0) {
+      cors <- lapply(1:n.clusters, function(c) as.matrix(cors[clusters==c, clusters==c]))   
+    } else {
+      cors <- list(cors)
+    }
+    return(cors)    
   }
-  cor.list <- mapply(splitCors, clusters, cor.list, SIMPLIFY=FALSE)
+  cor.list <- mapply(splitCors, clusters, cor.list, mod, SIMPLIFY=FALSE)
   cor.list <- unlist(cor.list, recursive=FALSE)
 
-  if (length(cor.list) < 2 ^ n.splits) {
+  if (any(mod > 0)) {
     return(spectralSplit(cor.list, n.splits, qt.threshold))
   } else {
     return(gene.clusters)
@@ -273,50 +282,6 @@ generateSimilarityMatrix <- function(gene.sim, genes) {
   return(similarity.matrix)
 }
   
-getLocalModules <- function(cor.list, threshold=0.25) {
-
-  # Determine modules that are consistent across multiple principle patterns
-  # args:
-  #  cor.list: a list of correlation matrices, typically determined from
-  #   multiple pp
-  # threhold: a numeric value between 0 and 1 specifying the quantile to
-  #   set adjacency at
-  set.seed(47)
-  spectral.outputs <- lapply(cor.list, spectralPreprocess, threshold=threshold, n.eigen=1)
-  spectral.vectors <- sapply(spectral.outputs, '[', 'sv')
-  spectral.clustering <- lapply(spectral.vectors, kmeans, center=2, nstart=10)
-  spectral.clusters <- sapply(spectral.clustering, '[', 'cluster')
-
-  # find all genes that are expressed in all local networks
-  gene.names <- lapply(cor.list, rownames)
-  jointly.expressed <- Reduce(intersect, gene.names)
-
-  # for each jointly expressed gene, determine its cluster in the different
-  # local networks
-  cluster.mat <- matrix(0, nrow=length(jointly.expressed), ncol=length(cor.list))
-  for (i in 1:length(jointly.expressed)) {
-
-    gene <- jointly.expressed[i]
-    gene.idcs <- sapply(gene.names, function(g) which(g==gene))
-    cluster.mat[i,] <- mapply(function(clusters, idx) clusters[idx], spectral.clusters, gene.idcs)
-  }
-
-  module.mat <- matrix(FALSE, nrow=length(jointly.expressed), ncol=length(jointly.expressed))
-  for (i in 1:nrow(module.mat)) {
-    for (j in i:nrow(module.mat)) {
-      mod <- all(cluster.mat[i,] == cluster.mat[j,])
-      module.mat[i,j] <- mod
-      module.mat[j,i] <- mod
-    }
-  }
-  rownames(module.mat) <- jointly.expressed
-  colnames(module.mat) <- jointly.expressed
-
-  modules <- unique(apply(module.mat, MARGIN=1, which))
-  modules <- sapply(modules, function(m) jointly.expressed[m])
-  return(list(mod=modules, mat=module.mat, genes=jointly.expressed))
-}
-
 subsetNetwork <- function(cor.mat, genes) {
 
   cor.names <- rownames(cor.mat)
@@ -389,6 +354,8 @@ generateAdjacency <- function(cor.mat, threshold) {
 }
 
 modularity <- function(adjacency, label) {
+  
+  if (all(adjacency == 0)) return(0)
 
   lab.vals <- unique(label)
   if (length(lab.vals) > 2) stop('maximum of two classes')
@@ -396,12 +363,19 @@ modularity <- function(adjacency, label) {
   lab2.idcs <- which(label == lab.vals[2])
   label[lab1.idcs] <- 1
   label[lab2.idcs] <- -1
+  
   m <- sum(adjacency) 
   degree <- rowSums(adjacency)
   joint.degree <- degree %*% t(degree) / (2 * m)
-  joint.label <- label %*% t(label)
-  joint.label[joint.label == -1] <- 0
-  pw.modularity <- (adjacency - joint.degree) * joint.label
-  mod <- (1 / (2 * m)) * sum(pw.modularity)#[upper.tri(pw.modularity, diag=FALSE)])
-  return(mod)
+  modularity <- (1 / (4*m)) * (t(label) %*% (adjacency - joint.degree) %*% label)
+  return(modularity)
+}
+
+getGeneNetwork <- function(cor.mat, threshold, genes) {
+  
+  adjacency <- generateAdjacency(cor.mat, threshold=threshold)
+  adjacency <- adjacency * sign(cor.mat)
+  gene.idcs <- which(rownames(adjacency) %in% genes)
+  gene.network <- adjacency[gene.idcs, gene.idcs]
+  return(gene.network)
 }
