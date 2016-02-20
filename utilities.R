@@ -1,3 +1,4 @@
+# Plotting functions for embryo images and correlation networks
 
 plotEmb <- function(D, width, height) {
   # Convert a column vector of expression values for plotting
@@ -34,6 +35,54 @@ generateImage <- function(template, data) {
   return(full.img)
 } 
 
+plotCorGraph <- function(cor.mat, vals.thresh=NULL, qt.thresh=0.5, circle=FALSE) {
+  
+  # plot graph corresponding to a correlation matrix after threshing at
+  # specified value or quantile
+  # args:
+  #  cor.mat: correlation matrix
+  #  vals.thresh: numeric vector of length two specifying upper and lower values
+  #   to thresh the correlation matrix at
+  #  qt.thresh: can be used instead of vals.thresh to indicate a quantile to
+  #   thresh at
+  #  circle: should the graph be laid out as a circle
+  if (is.null(thresh)) {
+    vals.thresh <- getQtThreshold(cor.mat, qt.thresh) 
+  }
+  
+  ## remove edges for correlations below quantile thresh
+  diag(cor.mat) <- 0
+  cor.mat[cor.mat > thresh[1] & cors < thresh[2]] <- 0
+
+  if (! all(cor.mat == 0)) {
+    graph <- graph.adjacency(cor.mat, mode='lower', weighted=TRUE)
+    edge.sign <- sign(E(graph)$weight)
+    E(graph)$color <- ifelse(edge.sign > 0, 'green', 'red')
+
+    graph.layout <- layout.auto(graph)
+    if(circle) graph.layout <- layout.circle(graph)
+    plot(graph, vertex.label.cex=0.5, layout=graph.layout)
+  } else{
+    warning('no interactions at specified thresh')
+  }
+}
+
+
+plotHeatmap <- function(sim.mat, thresh=NULL, cex=1) {
+  
+  # plot nicer heatmaps using heatmaps.2 with adjusted margins
+  # args:
+  #  sim.mat: a similarity matrix obtained through e.g. spectral split
+  #  thresh: if specified, all values withing thresh will be set to 0
+  #  cex: graphical parameter for label text size
+  if (!is.null(thresh)) {
+    sim.mat[sim.mat > thresh[1] & sim.mat < thresh[2]] <- 0
+  }
+  heatmap.2(abs(sim.mat), dendrogram="none", trace="none", key=FALSE, 
+                lhei=c(1,7), lwid=c(1, 9), cexRow=cex, cexCol=cex)
+}
+
+# Functions used for generating locally weighted correlation matrices
 weightedCorVector <- function(x, y, w) {
 
   # Calculate the weighted correlation between two vectors
@@ -129,30 +178,26 @@ mergeDuplicates <- function(cor.mat, node.names) {
   return(cor.mat)
 }
 
-spectralPreprocess <- function(cor.mat, threshold, n.eigen) {
+# Functions for spectral clustering of gene networks
+laplacianSVD <- function(cor.mat, thresh, n.eigen) {
 
   # Calculate the spectral decomposition of the normalized Laplacian for a
-  # correlation matrix, where adjacency is determined by thresholding
+  # correlation matrix, where adjacency is determined by threshing
   # correlations at a specific quantile
   # args:
   #  cor.mat: a matrix of correlations
-  #  threshold: a numeric value between 0 and 1 specifying the quantile to
+  #  thresh: a numeric value between 0 and 1 specifying the quantile to
   #   set adjacency at
   #  n.eigen: the number of eigenvectors to return, starting with n-1 and
   #  working backwards
 
-  # determine threhsold value based on wuantiles of correlation matrix
+  # determine threhsold value based on quantiles of correlation matrix
   if (nrow(cor.mat) == 1) {
-    return(list(sv=1, e=1))
+    return(1)
   } else{
-    qt.threshold <- getQtThreshold(cor.mat, threshold) 
 
     # calculate adjacency and normalizing matrices
-    adjacency <- cor.mat
-    diag(adjacency) <- 0
-    adjacency[adjacency <= qt.threshold[1] | adjacency >= qt.threshold[2]] <- 1
-    adjacency[adjacency != 1] <- 0
-
+    adjacency <- generateAdjacency(cor.mat, thresh)
     n <- nrow(adjacency)
     col.sums <- colSums(adjacency)
     col.sums.sqrt <- sqrt(col.sums)
@@ -168,20 +213,20 @@ spectralPreprocess <- function(cor.mat, threshold, n.eigen) {
                                
     L <- diag(n) - solve(d.sqrt) %*% adjacency %*% solve(d.sqrt)
     e <- eigen(L)              
-    spectral.vectors <- matrix(e$vectors[,(n-n.eigen):(n-1)], nrow=n)
+    e.vectors <- matrix(e$vectors[,(n-n.eigen):(n-1)], nrow=n)
     
     # add back removed observations with value of 0
     if (length(idcs2remove) != 0) {
       temp <- numeric(nrow(cor.mat))
-      temp[-idcs2remove] <- spectral.vectors
-      spectral.vectors <- matrix(temp, nrow=nrow(cor.mat))
+      temp[-idcs2remove] <- e.vectors
+      e.vectors <- matrix(temp, nrow=nrow(cor.mat))
     }
-    rownames(spectral.vectors) <- rownames(cor.mat)
-    return(spectral.vectors)
+    rownames(e.vectors) <- rownames(cor.mat)
+    return(vec)
     }
 }
 
-spectralSplit <- function(cor.list, n.splits=1, qt.threshold=0.25) { 
+spectralSplit <- function(cor.list, n.splits=1, qt.thresh=0.25) { 
 
   # Recursively split graph until cluster sizes are below a specified value.
   # Stop splitting clusters if they fall below a certain size
@@ -191,11 +236,13 @@ spectralSplit <- function(cor.list, n.splits=1, qt.threshold=0.25) {
   #  min.size: integer that determines when to stop splitting a given cluster
   #  max.size: integer that determines when to exit the function. Cuts will
   #   continue until all clusters are below max.size 
-  # qt.threshold: a numeric value between 0 and 1 specifying the quantile to
+  # qt.thresh: a numeric value between 0 and 1 specifying the quantile to
   #   set adjacency at
   set.seed(47)
-  sv <- lapply(cor.list, spectralPreprocess, threshold=qt.threshold, n.eigen=1)
-   
+
+  # split laplacian eigenvector into two groups and determine modularity of the
+  # clustering
+  vec <- lapply(cor.list, laplacianSVD, thresh=qt.thresh, n.eigen=1)  
   clusterVectors <- function(v) {
     if(length(v) > 2){ 
       return(kmeans(v, center=2, nstart=10)$cluster)
@@ -205,19 +252,27 @@ spectralSplit <- function(cor.list, n.splits=1, qt.threshold=0.25) {
       return(1)
     }
   }
-  clusters <- lapply(sv, clusterVectors)
-  genes <- lapply(cor.list, rownames)
-  
-  adj.list <- lapply(cor.list, function(c) generateAdjacency(c, threshold=qt.threshold))
+  clusters <- lapply(sv, clusterVectors)  
+  adj.list <- lapply(cor.list, function(c) generateAdjacency(c, thresh=qt.thresh))
   mod <- mapply(function(a, c) modularity(a, c), adj.list, clusters)
-  splitGenes <- function(clusters, gene.names) {
-    lapply(1:length(unique(clusters)), function(c) gene.names[clusters==c])
+   
+  # sif modularity is positive, split genes according to spectral clustering
+  genes <- lapply(cor.list, rownames)
+  splitGenes <- function(clusters, gene.names, mod) {
+
+    n.clusters <- length(unique(clusters))
+    if (mod > 0) {
+      lapply(1:n.clusters, function(c) gene.names[clusters==c])
+    } else {
+      list(gene.names)
   }
-  gene.clusters <- mapply(splitGenes, clusters, genes, SIMPLIFY=FALSE)
+  gene.clusters <- mapply(splitGenes, clusters, genes, cors, SIMPLIFY=FALSE)
   gene.clusters <- unlist(gene.clusters, recursive=FALSE)
 
-  # if modularity is positive, split correlation matrices
+  # if modularity is positive, split correlation matrices, else return the
+  # original matrix
   splitCors <- function(clusters, cors, mod) {
+    
     n.clusters <- length(unique(clusters))
     if (mod > 0) {
       cors <- lapply(1:n.clusters, function(c) as.matrix(cors[clusters==c, clusters==c]))   
@@ -230,7 +285,7 @@ spectralSplit <- function(cor.list, n.splits=1, qt.threshold=0.25) {
   cor.list <- unlist(cor.list, recursive=FALSE)
 
   if (any(mod > 0)) {
-    return(spectralSplit(cor.list, n.splits, qt.threshold))
+    return(spectralSplit(cor.list, qt.thresh))
   } else {
     return(gene.clusters)
   }
@@ -238,7 +293,6 @@ spectralSplit <- function(cor.list, n.splits=1, qt.threshold=0.25) {
 
 geneSimilarity <- function(cluster.tree, genes, set.size=2) {
 
-  # TODO: gene sometimes not appearing in cluster tree after selection, fix this
   gene.set <- combn(genes, set.size, simplify=FALSE)
 
   # determine which trees contain both genes in a given pair
@@ -266,7 +320,11 @@ geneSimilarity <- function(cluster.tree, genes, set.size=2) {
 
  
 generateSimilarityMatrix <- function(gene.sim, genes) {
-  
+  # function for generating a similarity matrix for gene pairs based on the
+  # output of gene similarity
+  # args:
+  #  gene.sim: output from geneSimilarity
+  #  genes: a vector of gene names for which to determine pairwise similarity 
   pair.list <- gene.sim$gene.set
   pair.similarity <- gene.sim$set.prop 
   similarity.matrix <- matrix(0, nrow=length(genes), ncol=length(genes)) 
@@ -281,62 +339,34 @@ generateSimilarityMatrix <- function(gene.sim, genes) {
   }
   return(similarity.matrix)
 }
-  
+
+# General network utility functions for dealing with correlation matrices
 subsetNetwork <- function(cor.mat, genes) {
 
+  # subset a correlation matrix to indicated genes
   cor.names <- rownames(cor.mat)
   gene.idcs <- cor.names %in% genes
   return(cor.mat[gene.idcs, gene.idcs])
 }
 
-plotCorGraph <- function(cor.mat, threshold=NULL, qt.threshold=0.5, scale=0.5) {
-
-  
-  #if (is.null(threshold)) {
-  #  threshold <- getQtThreshold(cor.mat, qt.threshold) 
-  #}
-  ## remove edges for correlations below quantile threshold
-  #diag(cor.mat) <- 0
-  #cor.mat[cor.mat > threshold[1] & cors < threshold[2]] <- 0
-
-  if (! all(cor.mat == 0)) {
-    graph <- graph.adjacency(cor.mat, mode='lower', weighted=TRUE)
-    edge.sign <- sign(E(graph)$weight)
-    edge.weight <- abs(E(graph)$weight)
-    E(graph)$color <- ifelse(edge.sign > 0, 'green', 'red')
-
-    #graph.layout <- layout.circle(graph)
-    plot(graph, edge.width=exp(scale * edge.weight) / scale, vertex.label.cex=0.5)
-         #layout=graph.layout)
-  } else{
-    warning('no interactions at specified threshold')
-  }
-}
-
-getQtThreshold <- function(cor.mat, qt.threshold) {
+getQtThreshold <- function(cor.mat, qt.thresh) {
 
   # Calculate a specified quantile for a correlation matrix
   # args:
   #  cor.mat: a matrix of correlations
-  #  qt.threshold: a numeric value between 0 and 1 specifying the quantile
+  #  qt.thresh: a numeric value between 0 and 1 specifying the quantile
 
-  qt.threshold <- max(qt.threshold, 1-qt.threshold)
+  qt.thresh <- max(qt.thresh, 1-qt.thresh)
   cor.vector <- cor.mat[upper.tri(cor.mat, diag=FALSE)]
-  threshold <- quantile(cor.vector, c(1-qt.threshold, qt.threshold))
-  return(threshold)
+  thresh <- quantile(cor.vector, c(1-qt.thresh, qt.thresh))
+  return(thresh)
 }
 
-plotHeatmap <- function(sim.mat, threshold=NULL, cex=1) {
-
-  if (!is.null(threshold)) {
-    sim.mat[sim.mat > threshold[1] & sim.mat < threshold[2]] <- 0
-  }
-  heatmap.2(abs(sim.mat), dendrogram="none", trace="none", key=FALSE, 
-                lhei=c(1,9), lwid=c(1, 9), cexRow=cex, cexCol=cex)
-}
 
 generateNoisyCor <- function(cor.mat, eps) {
 
+  # generate a correlation matrix based on iid gaussian variables that can be
+  # used to add noise to an estimated correlation matrix
   n <- nrow(cor.mat)
   noise <- matrix(rnorm(n ^ 2), nrow=n)
   noise.cor <- cor(noise) * eps
@@ -344,17 +374,21 @@ generateNoisyCor <- function(cor.mat, eps) {
   return(cor.mat + noise.cor)
 }
 
-generateAdjacency <- function(cor.mat, threshold) {
+generateAdjacency <- function(cor.mat, qt.thresh) {
 
-  thrsh <- getQtThreshold(cor.mat, threshold)
-  cor.mat[cor.mat >= thrsh[1] & cor.mat <= thrsh[2]] <- 0
+  # threshold a correlation matrix at specified quantile and generate
+  # corresponding adjacency matrix
+  thresh <- getQtThreshold(cor.mat, qtthresh)
+  cor.mat[cor.mat >= thresh[1] & cor.mat <= thresh[2]] <- 0
   cor.mat[cor.mat != 0] <- 1
   diag(cor.mat) <- 0
   return(cor.mat)
 }
 
 modularity <- function(adjacency, label) {
-  
+ 
+  # calculate the modularity associated with a specific labeling of the
+  # adjacency matrix 
   if (all(adjacency == 0)) return(0)
 
   lab.vals <- unique(label)
@@ -371,9 +405,10 @@ modularity <- function(adjacency, label) {
   return(modularity)
 }
 
-getGeneNetwork <- function(cor.mat, threshold, genes) {
-  
-  adjacency <- generateAdjacency(cor.mat, threshold=threshold)
+getGeneNetwork <- function(cor.mat, thresh, genes) {
+ 
+   
+  adjacency <- generateAdjacency(cor.mat, thresh=thresh)
   adjacency <- adjacency * sign(cor.mat)
   gene.idcs <- which(rownames(adjacency) %in% genes)
   gene.network <- adjacency[gene.idcs, gene.idcs]
