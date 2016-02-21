@@ -48,20 +48,34 @@ set.seed(47)
 # stability based analysis of spectral clustering: take subsets of nodes and
 # split resulting graphs using spectral clustering. How often do genes appear in
 # the same leaf nodes
-n.trees <- 50
+n.trees <- 100
 
 # stability through subsampling
-#node.samples <- replicate(n.trees, unique(sample(1:n.nodes, replace=TRUE)), simplify=FALSE)
-#cor.samples <- lapply(node.samples, function(s) list(cors.pp7[s, s])) # subsample
+node.samples <- replicate(n.trees, unique(sample(1:n.nodes, replace=TRUE)), simplify=FALSE)
+cor.samples <- lapply(node.samples, function(s) list(cors.pp7[s, s])) # subsample
 
 #stability through noise
-set.seed(47)
-eps <- 1
-cor.samples <- lapply(1:n.trees, function(s) list(generateNoisyCor(cors.pp7, eps)))
+#set.seed(47)
+#eps <- 0.5
+#cor.samples <- lapply(1:n.trees, function(s) list(generateNoisyCor(cors.pp7, eps)))
 
-cluster.subsamples <- lapply(cor.samples, spectralSplit, n.splits=3, qt.threshold=0.25)
+# TODO: get rid of n.splits
+cluster.subsamples <- lapply(cor.samples, spectralSplit, qt.thresh=0.25)
 gene.similarity.output <- geneSimilarity(cluster.subsamples, rownames(cors.pp7))
 gene.sim.mat <- generateSimilarityMatrix(gene.similarity.output, rownames(cors.pp7))
+
+gene.names <- rownames(cors.pp7)
+gene.pairs <- combn(gene.names, 2, simplify=FALSE)
+cor.vals <- sapply(gene.pairs, function(p) cors.pp7[p[1], p[2]])
+pairs.ordered <- gene.pairs[order(abs(cor.vals), decreasing=TRUE)]
+sim.ordered <- gene.similarity.output$gene.set[order(gene.similarity.output$set.prop, decreasing=TRUE)]
+
+gene.names <- rownames(cors.pp7)
+gene.pairs <- combn(gene.names, 2, simplify=FALSE)
+cor.vals <- sapply(gene.pairs, function(p) cors.pp7[p[1], p[2]])
+sorted.spectral.pairs <- sortSets(gene.similarity.output)
+sorted.cor.pairs <- sortSets(list(gene.set=gene.pairs, set.prop=cor.vals))
+
 
 h.cluster <- hclust(dist(1-gene.sim.mat))
 clusters <- cutree(h.cluster, k=4)

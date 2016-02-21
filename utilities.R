@@ -409,6 +409,14 @@ modularity <- function(adjacency, label) {
   return(modularity)
 }
 
+sortSets <- function(gene.sims) {
+
+  set <- gene.sims$gene.set
+  sort.vals <- gene.sims$set.prop
+  order.idcs <- order(abs(sort.vals), decreasing=TRUE)
+  return(list(set=set[order.idcs], vals=sort.vals[order.idcs]))
+}
+
 getGeneNetwork <- function(cor.mat, thresh, genes) {
     
   adjacency <- generateAdjacency(cor.mat, thresh=thresh)
