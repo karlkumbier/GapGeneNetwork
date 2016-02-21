@@ -67,8 +67,8 @@ gene.sim.mat <- generateSimilarityMatrix(gene.similarity.output, rownames(cors.p
 gene.names <- rownames(cors.pp7)
 gene.pairs <- combn(gene.names, 2, simplify=FALSE)
 cor.vals <- sapply(gene.pairs, function(p) cors.pp7[p[1], p[2]])
-pairs.ordered <- gene.pairs[order(abs(cor.vals), decreasing=TRUE)]
-sim.ordered <- gene.similarity.output$gene.set[order(gene.similarity.output$set.prop, decreasing=TRUE)]
+cors.ordered <- sortSets(list(gene.sets=gene.pairs, set.prop=cor.vals))
+sim.ordered <- sortSets(gene.similarity.output) 
 
 gene.names <- rownames(cors.pp7)
 gene.pairs <- combn(gene.names, 2, simplify=FALSE)
