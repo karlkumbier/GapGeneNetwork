@@ -41,8 +41,8 @@ for (i in 1:length(pp.centers)) {
   local.correlation.mats[[i]] <- local.correlation
 }
 
-cors.pp7 <- local.correlation.mats[[3]]
-n.nodes <- nrow(cors.pp7)
+cors <- local.correlation.mats[[3]]
+n.nodes <- nrow(cors)
 set.seed(47)
 
 # stability based analysis of spectral clustering: take subsets of nodes and
@@ -51,35 +51,41 @@ set.seed(47)
 n.trees <- 100
 
 # stability through subsampling
-node.samples <- replicate(n.trees, unique(sample(1:n.nodes, replace=TRUE)), simplify=FALSE)
-cor.samples <- lapply(node.samples, function(s) list(cors.pp7[s, s])) # subsample
+#node.samples <- replicate(n.trees, unique(sample(1:n.nodes, replace=TRUE)), simplify=FALSE)
+#cor.samples <- lapply(node.samples, function(s) list(cors[s, s])) # subsample
 
 #stability through noise
 #set.seed(47)
-#eps <- 0.5
-#cor.samples <- lapply(1:n.trees, function(s) list(generateNoisyCor(cors.pp7, eps)))
+eps <- 1
+cor.samples <- lapply(1:n.trees, function(s) list(generateNoisyCor(cors, eps)))
 
-# TODO: get rid of n.splits
 cluster.subsamples <- lapply(cor.samples, spectralSplit, qt.thresh=0.25)
-gene.similarity.output <- geneSimilarity(cluster.subsamples, rownames(cors.pp7))
-gene.sim.mat <- generateSimilarityMatrix(gene.similarity.output, rownames(cors.pp7))
+gene.similarity.output <- geneSimilarity(cluster.subsamples, rownames(cors))
+gene.sim.mat <- generateSimilarityMatrix(gene.similarity.output, rownames(cors))
 
-gene.names <- rownames(cors.pp7)
+gene.names <- rownames(cors)
 gene.pairs <- combn(gene.names, 2, simplify=FALSE)
-cor.vals <- sapply(gene.pairs, function(p) cors.pp7[p[1], p[2]])
+cor.vals <- sapply(gene.pairs, function(p) cors[p[1], p[2]])
 cors.ordered <- sortSets(list(gene.sets=gene.pairs, set.prop=cor.vals))
-sim.ordered <- sortSets(gene.similarity.output) 
+spectral.ordered <- sortSets(gene.similarity.output) 
 
-gene.names <- rownames(cors.pp7)
-gene.pairs <- combn(gene.names, 2, simplify=FALSE)
-cor.vals <- sapply(gene.pairs, function(p) cors.pp7[p[1], p[2]])
-sorted.spectral.pairs <- sortSets(gene.similarity.output)
-sorted.cor.pairs <- sortSets(list(gene.set=gene.pairs, set.prop=cor.vals))
+# compare with iid normal correlation matrix
+iid <- matrix(rnorm(n.nodes * nrow(tf.data)), ncol=n.nodes)
+iid.cor <- cor(iid, iid)
+rownames(iid.cor) <- paste0('X', 1:n.nodes)
+cor.samples <- lapply(1:n.trees, function(s) list(generateNoisyCor(iid.cor, eps)))
+
+cluster.subsamples <- lapply(cor.samples, spectralSplit, qt.thresh=0.25)
+gene.similarity.output <- geneSimilarity(cluster.subsamples, rownames(iid.cor))
+gene.sim.mat <- generateSimilarityMatrix(gene.similarity.output, rownames(iid.cor))
+iid.ordered <- sortSets(gene.similarity.output) 
+
+
 
 
 h.cluster <- hclust(dist(1-gene.sim.mat))
 clusters <- cutree(h.cluster, k=4)
-gene.clusters <- rownames(cors.pp7)[clusters == 2]
+gene.clusters <- rownames(cors)[clusters == 2]
 cluster.subsamples <- lapply(cor.samples, spectralSplit, n.splits=2, qt.threshold=0.1)
 gene.sim.4 <- geneSimilarity(cluster.subsamples, gene.clusters,  set.size=4) 
 
@@ -94,17 +100,17 @@ plotHeatmap(gene.sim.mat)
 dev.off()
 
 pdf(paste0(plot.dir, 'localCor.pdf')) 
-plotHeatmap(cors.pp7)
+plotHeatmap(cors)
 dev.off()
 
 pdf(paste0(plot.dir, 'localCor_90.pdf')) 
-thrsh <- getQtThreshold(cors.pp7, 0.9)
-plotHeatmap(cors.pp7, threshold=thrsh)
+thrsh <- getQtThreshold(cors, 0.9)
+plotHeatmap(cors, threshold=thrsh)
 dev.off()
 
 pdf(paste0(plot.dir, 'localCor_70.pdf'))  
-thrsh <- getQtThreshold(cors.pp7, 0.7)
-plotHeatmap(cors.pp7, threshold=thrsh)
+thrsh <- getQtThreshold(cors, 0.7)
+plotHeatmap(cors, threshold=thrsh)
 dev.off()
 
 # Comparison of global and local results

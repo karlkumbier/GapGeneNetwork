@@ -46,13 +46,13 @@ plotCorGraph <- function(cor.mat, vals.thresh=NULL, qt.thresh=0.5, circle=FALSE)
   #  qt.thresh: can be used instead of vals.thresh to indicate a quantile to
   #   thresh at
   #  circle: should the graph be laid out as a circle
-  if (is.null(thresh)) {
+  if (is.null(vals.thresh)) {
     vals.thresh <- getQtThreshold(cor.mat, qt.thresh) 
   }
   
   ## remove edges for correlations below quantile thresh
   diag(cor.mat) <- 0
-  cor.mat[cor.mat > thresh[1] & cors < thresh[2]] <- 0
+  cor.mat[cor.mat > vals.thresh[1] & cors < vals.thresh[2]] <- 0
 
   if (! all(cor.mat == 0)) {
     graph <- graph.adjacency(cor.mat, mode='lower', weighted=TRUE)
