@@ -55,9 +55,9 @@ plotCorGraph <- function(cor.mat, seed=47, vals.thresh=NULL, qt.thresh=0.5, circ
   cor.mat[cor.mat > vals.thresh[1] & cor.mat < vals.thresh[2]] <- 0
 
   # remove unconnected components
-  n.zero <- rowSums(cor.mat == 0)
-  disconnected <- which(n.zero == nrow(cor.mat))
-  if (length(disconnected) > 0) cor.mat <- cor.mat[-disconnected, -disconnected]
+  #n.zero <- rowSums(cor.mat == 0)
+  #disconnected <- which(n.zero == nrow(cor.mat))
+  #if (length(disconnected) > 0) cor.mat <- cor.mat[-disconnected, -disconnected]
   if (! all(cor.mat == 0)) {
     graph <- graph.adjacency(cor.mat, mode='lower', weighted=TRUE)
     edge.sign <- sign(E(graph)$weight)
@@ -320,6 +320,7 @@ geneSimilarity <- function(cluster.tree, genes, set.size=2) {
   }
   sameLeafProportion <- function(set, shared.idcs) {
     joint.trees <- cluster.tree[shared.idcs]
+    if (length(joint.trees) == 0) return(0) # genes in set never co-occur
     proportion <- mean(sapply(joint.trees, sameLeaf, set=set))
     return(proportion)
   }
@@ -431,4 +432,22 @@ getGeneNetwork <- function(cor.mat, thresh, genes) {
   gene.idcs <- which(rownames(adjacency) %in% genes)
   gene.network <- adjacency[gene.idcs, gene.idcs]
   return(gene.network)
+}
+
+setModules <- function(sim.mat, clusters) {
+
+  if (length(clusters) != nrow(sim.mat)) stop('dimension mismatch')
+
+  n.clusters <- length(unique(clusters))
+  cutMat <- function(sim.mat, c, clusters) {
+   cluster.idcs <- which(clusters==c)
+   sim.mat[cluster.idcs, -cluster.idcs] <- 0
+   sim.mat[-cluster.idcs, cluster.idcs] <- 0
+   return(sim.mat)
+  }
+
+  for (i in 1:n.clusters) {
+    sim.mat <- cutMat(sim.mat, i, clusters)
+  }
+  return(sim.mat)
 }
