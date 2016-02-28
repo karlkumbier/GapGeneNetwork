@@ -35,42 +35,86 @@ generateImage <- function(template, data) {
   return(full.img)
 } 
 
-plotCorGraph <- function(cor.mat, seed=47, vals.thresh=NULL, qt.thresh=0.5, circle=FALSE, ...) {
+plotModuleImage <- function(sim.mat, order, ...) {
+
+  sim.mat <- sim.mat[order, order]
+  image(sim.mat, axes=F, ...)
+  mtext(text=rownames(sim.mat), side=2, line=0.3, at=seq(0,1,1/nrow(sim.mat)), las=1, cex=25/nrow(sim.mat))
+  mtext(text=rownames(sim.mat), side=1, line=0.3, at=seq(0,1,1/nrow(sim.mat)), las=2, cex=25/nrow(sim.mat))
+  image.plot(sim.mat, legend.only=TRUE, horizontal=TRUE, smallplot=c(0.05, 0.45, 0.06, 0.09), ...) 
+
+}
+
+
+#plotCorGraph <- function(cor.mat, seed=47, vals.thresh=NULL, qt.thresh=0.5, circle=FALSE, ...) {
+#  
+#  # plot graph corresponding to a correlation matrix after threshing at
+#  # specified value or quantile
+#  # args:
+#  #  cor.mat: correlation matrix
+#  #  vals.thresh: numeric vector of length two specifying upper and lower values
+#  #   to thresh the correlation matrix at
+#  #  qt.thresh: can be used instead of vals.thresh to indicate a quantile to
+#  #   thresh at
+#  #  circle: should the graph be laid out as a circle
+#  if (is.null(vals.thresh)) {
+#    vals.thresh <- getQtThreshold(cor.mat, qt.thresh, remove.zero=TRUE) 
+#  }
+#  
+#  ## remove edges for correlations below quantile thresh
+#  diag(cor.mat) <- 0
+#  cor.mat[cor.mat > vals.thresh[1] & cor.mat < vals.thresh[2]] <- 0
+#
+#  # remove unconnected components
+#  #n.zero <- rowSums(cor.mat == 0)
+#  #disconnected <- which(n.zero == nrow(cor.mat))
+#  #if (length(disconnected) > 0) cor.mat <- cor.mat[-disconnected, -disconnected]
+#  if (! all(cor.mat == 0)) {
+#    graph <- graph.adjacency(cor.mat, mode='lower', weighted=TRUE)
+#    edge.sign <- sign(E(graph)$weight)
+#    E(graph)$color <- ifelse(edge.sign > 0, 'green', 'red')
+#    
+#    return(graph)
+#    set.seed(seed)
+#    graph.layout <- layout.fruchterman.reingold(graph)                                                 
+#    if(circle) graph.layout <- layout.circle(graph)
+#    plot(graph, vertex.label.cex=0.8, vertex.label.family="Helvetica", vertex.label.font=2, vertex.shape='circle', vertex.size=1, layout=graph.layout)
+#  } else{
+#    warning('no interactions at specified thresh')
+#  }
+#}
+getWeight <- function(cor.mat, edge.name) {
+    nodes <- unlist(strsplit(edge.name, '~'))
+  wt <- cor.mat[nodes[1], nodes[2]]
+    return(wt)
+} 
+
+getWeights <- function(cor.mat, edge.names) {
+    wts <- sapply(edge.names, getWeight, cor.mat=cor.mat)
+  return(wts)
+} 
+
+plotCorGraph <- function(cor.mat, qt.thresh=0.5, emph.nodes=NULL, seed=47) {
   
   # plot graph corresponding to a correlation matrix after threshing at
   # specified value or quantile
   # args:
   #  cor.mat: correlation matrix
-  #  vals.thresh: numeric vector of length two specifying upper and lower values
-  #   to thresh the correlation matrix at
-  #  qt.thresh: can be used instead of vals.thresh to indicate a quantile to
-  #   thresh at
-  #  circle: should the graph be laid out as a circle
-  if (is.null(vals.thresh)) {
-    vals.thresh <- getQtThreshold(cor.mat, qt.thresh, remove.zero=TRUE) 
-  }
-  
-  ## remove edges for correlations below quantile thresh
-  diag(cor.mat) <- 0
-  cor.mat[cor.mat > vals.thresh[1] & cor.mat < vals.thresh[2]] <- 0
+  #  qt.thresh: indicates a quantile to thresh at
+  adj.mat <- generateAdjacency(cor.mat, qt.thresh=qt.thresh)
+  graph <- new("graphAM", adjMat=adj.mat, edgemode="undirected")
+  node.names <- nodes(graph)
+  edge.names <- edgeNames(graph)
 
-  # remove unconnected components
-  #n.zero <- rowSums(cor.mat == 0)
-  #disconnected <- which(n.zero == nrow(cor.mat))
-  #if (length(disconnected) > 0) cor.mat <- cor.mat[-disconnected, -disconnected]
-  if (! all(cor.mat == 0)) {
-    graph <- graph.adjacency(cor.mat, mode='lower', weighted=TRUE)
-    edge.sign <- sign(E(graph)$weight)
-#
-    E(graph)$color <- ifelse(edge.sign > 0, 'green', 'red')
+  edge.weight <- getWeights(adj.mat * cors, edge.names)
+  edge.color <- ifelse(edge.weight > 0, 'blue', 'red') 
+  node.color <- rep('lightgreen', length(emph.nodes))
+  names(node.color) <- emph.nodes
 
-    set.seed(seed)
-    graph.layout <- layout.fruchterman.reingold(graph)                                                 
-    if(circle) graph.layout <- layout.circle(graph)
-    plot(graph, vertex.label.cex=0.8, vertex.label.family="Helvetica", vertex.label.font=2, vertex.shape='circle', vertex.size=1, layout=graph.layout)
-  } else{
-    warning('no interactions at specified thresh')
-  }
+  eAttrs <- list(color=edge.color)
+  nAttrs <- list(fillcolor=node.color)
+  attrs <- list(node=list(fontsize=14, shape="ellipse", fixedsize=FALSE))
+  plot(graph, "fdp", attrs=attrs, nodeAttrs=nAttrs, edgeAttrs=eAttrs)
 }
 
 

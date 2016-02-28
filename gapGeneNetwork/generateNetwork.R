@@ -1,7 +1,7 @@
 library(R.matlab)
 library(RColorBrewer)
 library(igraph)
-source('utilities.R')
+source('../utilities.R')
 load('dictFitDataNLS.RData')
 mat.data <- readMat('embTemplate.mat')
 template <- mat.data$template[,,1]
@@ -25,7 +25,7 @@ local.correlation.mats <- list()
 local.weighted.expression <- list()
 for (i in 1:length(pp.centers)) {
   pp.idx <- pp.centers[i]
-  pp.region <- pp.neighbors[[i]]
+  pp.region <- c(pp.idx, pp.neighbors[[i]])
   expressed <- function(x) any(x > 0.1)
   local.tf.idcs <- which(apply(tf.alphas[pp.region,], 2, expressed))
   local.tf.data <- tf.data[, local.tf.idcs]
@@ -41,99 +41,71 @@ for (i in 1:length(pp.centers)) {
   local.correlation.mats[[i]] <- local.correlation
 }
 
-cors <- local.correlation.mats[[3]]
-n.nodes <- nrow(cors)
-set.seed(47)
-
-# stability based analysis of spectral clustering: take subsets of nodes and
+# stabiliti y based analysis of spectral clustering: take subsets of nodes and
 # split resulting graphs using spectral clustering. How often do genes appear in
 # the same leaf nodes
-n.trees <- 100
 
-# stability through subsampling
-#node.samples <- replicate(n.trees, unique(sample(1:n.nodes, replace=TRUE)), simplify=FALSE)
-#cor.samples <- lapply(node.samples, function(s) list(cors[s, s])) # subsample
+root.dir <- '/Users/Karl/Desktop/LBL/NMF/gapGeneNetwork/networkPlotsOrgan/'
+for (2 in 1:length(local.correlation.mats)) {
+  print(i)
+  cur.dir <- paste0(root.dir, 'pp', pp.centers[i], '/')
+  dir.create(cur.dir, recursive=TRUE)
+  setwd(cur.dir)
+  
+  gap.genes <- c('Kr', 'kni', 'hb', 'tll', 'hkb', 'gt')
 
-#stability through noise
-#set.seed(47)
-eps <- 1
-cor.samples <- lapply(1:n.trees, function(s) list(generateNoisyCor(cors, eps)))
+  set.seed(47)
+  n.trees <- 100
 
-cluster.subsamples <- lapply(cor.samples, spectralSplit, qt.thresh=0.25)
-gene.similarity.output <- geneSimilarity(cluster.subsamples, rownames(cors))
-gene.sim.mat <- generateSimilarityMatrix(gene.similarity.output, rownames(cors))
+  # stability through subsampling
+  cors <- local.correlation.mats[[i]]
+  n.nodes <- nrow(cors)
+  gene.names <- rownames(cors)
+  node.samples <- replicate(n.trees, unique(sample(1:n.nodes, replace=TRUE)), simplify=FALSE)
+  cor.samples <- lapply(node.samples, function(s) list(cors[s, s])) # subsample
+  #cor.samples <- c(cor.samples, lapply(node.samples, function(s) list(cors[s, s])))
 
-gene.names <- rownames(cors)
-gene.pairs <- combn(gene.names, 2, simplify=FALSE)
-cor.vals <- sapply(gene.pairs, function(p) cors[p[1], p[2]])
-cors.ordered <- sortSets(list(gene.sets=gene.pairs, set.prop=cor.vals))
-spectral.ordered <- sortSets(gene.similarity.output) 
+  #stability through noise
+  #set.seed(47)
+  #eps <- 0.25
+  #cor.samples <- lapply(1:n.trees, function(s) list(generateNoisyCor(cors, eps)))
+  cluster.subsamples <- lapply(cor.samples, spectralSplit, qt.thresh=0.25)
+  gene.similarity.output <- geneSimilarity(cluster.subsamples, gene.names)
+  gene.sim.mat <- generateSimilarityMatrix(gene.similarity.output, gene.names)
+  gene.sim.mat <- gene.sim.mat / max(gene.sim.mat)
+  diag(gene.sim.mat) <- 1
 
-# compare with iid normal correlation matrix
-iid <- matrix(rnorm(n.nodes * nrow(tf.data)), ncol=n.nodes)
-iid.cor <- cor(iid, iid)
-rownames(iid.cor) <- paste0('X', 1:n.nodes)
-cor.samples <- lapply(1:n.trees, function(s) list(generateNoisyCor(iid.cor, eps)))
+  pdf(paste0('moduleImagePP', pp.centers[i], '.pdf'))
+  h.cluster <- hclust(dist(1-gene.sim.mat))
+  o <- h.cluster$order
+  plotModuleImage(gene.sim.mat, o, col=colorRampPalette(c('white', 'orange', 'red'))(10))
+  dev.off()
 
-cluster.subsamples <- lapply(cor.samples, spectralSplit, qt.thresh=0.25)
-gene.similarity.output <- geneSimilarity(cluster.subsamples, rownames(iid.cor))
-gene.sim.mat <- generateSimilarityMatrix(gene.similarity.output, rownames(iid.cor))
-iid.ordered <- sortSets(gene.similarity.output) 
+  pdf(paste0('moduleNetworkPP', pp.centers[i], '.pdf'))
+  par(mar=rep(0, 4))
+  plotCorGraph(gene.sim.mat * sign(cors), qt.thresh=0.9, seed=10)
+  dev.off()
 
+  # local networks for inverse and marginal
+  pdf(paste0('corNetworkPP', pp.centers[i], '.pdf'))
+  cor.adj <- generateAdjacency(cors, qt.thresh=0.95)
+  plotNetwork(cor.adj * cors, gap.genes)
+  dev.off()
 
+  pdf(paste0('gapNetwork_090_PP', pp.centers[i], '.pdf'))
+  cor.adj <- generateAdjacency(cors, qt.thresh=0.9)
+  plotNetworkSubset(cor.adj * cors, gap.genes)
+  dev.off()
 
+  pdf(paste0('corNetworkInvPP', pp.centers[i], '.pdf'))
+  cor.adj <- generateAdjacency(solve(cors), qt.thresh=0.95)
+  plotNetwork(cor.adj * solve(cors), gap.genes)
+  dev.off()
 
-h.cluster <- hclust(dist(1-gene.sim.mat))
-clusters <- cutree(h.cluster, k=4)
-gene.clusters <- rownames(cors)[clusters == 2]
-cluster.subsamples <- lapply(cor.samples, spectralSplit, n.splits=2, qt.threshold=0.1)
-gene.sim.4 <- geneSimilarity(cluster.subsamples, gene.clusters,  set.size=4) 
+  pdf(paste0('corNetworkInvi_gap_PP', pp.centers[i], '.pdf'))
+  cor.adj <- generateAdjacency(solve(cors), qt.thresh=0.9)
+  plotNetworkSubset(cor.adj * solve(cors), gap.genes)
+  dev.off()
+}
 
-# Comparison of spectral clustering and correlation based results
-library(gplots)
-diag(gene.sim.mat) <- 1
-plot.dir <- './corrlationComparison/'
-dir.create(plot.dir)
-
-pdf(paste0(plot.dir, 'localSpectral.pdf')) 
-plotHeatmap(gene.sim.mat)
-dev.off()
-
-pdf(paste0(plot.dir, 'localCor.pdf')) 
-plotHeatmap(cors)
-dev.off()
-
-pdf(paste0(plot.dir, 'localCor_90.pdf')) 
-thrsh <- getQtThreshold(cors, 0.9)
-plotHeatmap(cors, threshold=thrsh)
-dev.off()
-
-pdf(paste0(plot.dir, 'localCor_70.pdf'))  
-thrsh <- getQtThreshold(cors, 0.7)
-plotHeatmap(cors, threshold=thrsh)
-dev.off()
-
-# Comparison of global and local results
-global.cors <- cor(tf.data)
-global.cors <- mergeDuplicates(global.cors, tf.names)
-
-pdf(paste0(plot.dir, 'globalCor.pdf')) 
-plotHeatmap(global.cors, cex=0.4)
-dev.off()
-
-pdf(paste0(plot.dir, 'globalCor_90.pdf')) 
-thrsh <- getQtThreshold(global.cors, 0.9)
-plotHeatmap(global.cors, threshold=thrsh, cex=0.4)
-dev.off()
-
-global.cors.thrsh <- global.cors
-global.cors.thrsh[global.cors > thrsh[1] & global.cors < thrsh[2]] <- 0
-
-
-set.seed(47)
-eps <- 0.05
-cor.samples <- lapply(1:n.trees, function(s) list(generateNoisyCor(global.cors, eps)))
-
-cluster.subsamples <- lapply(cor.samples, spectralSplit, n.splits=2, qt.threshold=0.25)
-gene.similarity.output <- geneSimilarity(cluster.subsamples, rownames(global.cors))
-gene.sim.mat <- generateSimilarityMatrix(gene.similarity.output, rownames(global.cors))
+plotCorGraph(gene.sim.mat * cors, qt.thresh=0.95, emph.nodes=gap.genes, seed=50)
