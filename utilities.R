@@ -45,52 +45,16 @@ plotModuleImage <- function(sim.mat, order, ...) {
 
 }
 
-
-#plotCorGraph <- function(cor.mat, seed=47, vals.thresh=NULL, qt.thresh=0.5, circle=FALSE, ...) {
-#  
-#  # plot graph corresponding to a correlation matrix after threshing at
-#  # specified value or quantile
-#  # args:
-#  #  cor.mat: correlation matrix
-#  #  vals.thresh: numeric vector of length two specifying upper and lower values
-#  #   to thresh the correlation matrix at
-#  #  qt.thresh: can be used instead of vals.thresh to indicate a quantile to
-#  #   thresh at
-#  #  circle: should the graph be laid out as a circle
-#  if (is.null(vals.thresh)) {
-#    vals.thresh <- getQtThreshold(cor.mat, qt.thresh, remove.zero=TRUE) 
-#  }
-#  
-#  ## remove edges for correlations below quantile thresh
-#  diag(cor.mat) <- 0
-#  cor.mat[cor.mat > vals.thresh[1] & cor.mat < vals.thresh[2]] <- 0
-#
-#  # remove unconnected components
-#  #n.zero <- rowSums(cor.mat == 0)
-#  #disconnected <- which(n.zero == nrow(cor.mat))
-#  #if (length(disconnected) > 0) cor.mat <- cor.mat[-disconnected, -disconnected]
-#  if (! all(cor.mat == 0)) {
-#    graph <- graph.adjacency(cor.mat, mode='lower', weighted=TRUE)
-#    edge.sign <- sign(E(graph)$weight)
-#    E(graph)$color <- ifelse(edge.sign > 0, 'green', 'red')
-#    
-#    return(graph)
-#    set.seed(seed)
-#    graph.layout <- layout.fruchterman.reingold(graph)                                                 
-#    if(circle) graph.layout <- layout.circle(graph)
-#    plot(graph, vertex.label.cex=0.8, vertex.label.family="Helvetica", vertex.label.font=2, vertex.shape='circle', vertex.size=1, layout=graph.layout)
-#  } else{
-#    warning('no interactions at specified thresh')
-#  }
-#}
 getWeight <- function(cor.mat, edge.name) {
-    nodes <- unlist(strsplit(edge.name, '~'))
+  # return graph edge weight associated with a pair of nodes
+  nodes <- unlist(strsplit(edge.name, '~'))
   wt <- cor.mat[nodes[1], nodes[2]]
-    return(wt)
+  return(wt)
 } 
 
 getWeights <- function(cor.mat, edge.names) {
-    wts <- sapply(edge.names, getWeight, cor.mat=cor.mat)
+  # return graph edge weights associated with a list of node pairs
+  wts <- sapply(edge.names, getWeight, cor.mat=cor.mat)
   return(wts)
 } 
 
@@ -106,14 +70,15 @@ plotCorGraph <- function(cor.mat, qt.thresh=0.5, emph.nodes=NULL, seed=47) {
   node.names <- nodes(graph)
   edge.names <- edgeNames(graph)
 
-  edge.weight <- getWeights(adj.mat * cors, edge.names)
+  edge.weight <- getWeights(adj.mat * cor.mat, edge.names)
   edge.color <- ifelse(edge.weight > 0, 'blue', 'red') 
-  node.color <- rep('lightgreen', length(emph.nodes))
+  node.color <- rep('green3', length(emph.nodes))
   names(node.color) <- emph.nodes
 
   eAttrs <- list(color=edge.color)
-  nAttrs <- list(fillcolor=node.color)
-  attrs <- list(node=list(fontsize=14, shape="ellipse", fixedsize=FALSE))
+  nAttrs <- list(fontcolor=node.color)
+  #attrs <- list(node=list(fontsize=20, shape="ellipse", fixedsize=FALSE))
+  attrs <- list(node=list(fontsize=20, shape="plaintext", fixedsize=FALSE))
   plot(graph, "fdp", attrs=attrs, nodeAttrs=nAttrs, edgeAttrs=eAttrs)
 }
 
@@ -177,6 +142,47 @@ weightedCor <- function(data.mat, w) {
   }
   return(cor.mat)
 }
+
+localCor <- function(pp.center, pp.neighbors, tf.data, tf.names) {
+
+  pp.region <- c(pp.center, pp.neighbors)
+  expressed <- function(x) any(x > 0.1)
+  local.tf.idcs <- which(apply(tf.alphas[pp.region,], 2, expressed))
+  local.tf.data <- tf.data[, local.tf.idcs]
+  local.tf.names <- tf.names[local.tf.idcs]
+
+  pp.weights <- Dstd[, pp.center]
+  rescale <- function(x) return(x / sum(x))
+  pp.weights <- rescale(pp.weights)
+  
+  local.cor <- weightedCor(local.tf.data, pp.weights)
+  local.cor <- mergeDuplicates(local.cor, local.tf.names)
+  return(local.cor)
+}
+  
+#weightedRankCorVector <- function(x, y, w) {
+#
+#  n <- length(x)
+#  ranks.x <- order(x)
+#  ranks.y <- order(y)
+#  weighted.rank.diff <- sum(w * (ranks.x - ranks.y)^2)
+#  weighted.cor <- 1 - 6 * weighted.rank.diff / (n ^ 2 - 1)
+#  return(weighted.cor)
+#}
+#
+#weightedRankCor <- function(data.mat, w) {
+#  
+#  n.obs <- ncol(data.mat)
+#  cor.mat <- matrix(0, nrow=n.obs, ncol=n.obs)
+#  for (i in 1:n.obs) {
+#    for (j in i:n.obs) {
+#      weighted.cor <- weightedRankCorVector(data.mat[,i], data.mat[,j], w)
+#      cor.mat[i, j] <- weighted.cor
+#      cor.mat[j, i] <- weighted.cor
+#    }
+#  }
+#  return(cor.mat)
+#}
 
 mergeMax <- function(x) {
 

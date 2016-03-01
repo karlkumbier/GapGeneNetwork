@@ -1,6 +1,9 @@
+library(abind)
 library(R.matlab)
 library(RColorBrewer)
 library(igraph)
+library(fields)
+library(Rgraphviz)
 source('../utilities.R')
 load('dictFitDataNLS.RData')
 mat.data <- readMat('embTemplate.mat')
@@ -17,36 +20,14 @@ tf.names <- geneNames[tfInd]
 
 pp.centers <- c(5:9, 17, 20)
 pp.neighbors <- list(c(4, 6), c(4, 7), c(6, 8), c(7, 9), c(8, 17), c(9, 20), c(17, 20))
-# hindgut pp as determined by annotations
-#pp.centers <- c(17:19)
-#pp.neighbors <- list(c(16, 18), c(10, 19, 20), c(18, 21))
 
-local.correlation.mats <- list()
-local.weighted.expression <- list()
-for (i in 1:length(pp.centers)) {
-  pp.idx <- pp.centers[i]
-  pp.region <- c(pp.idx, pp.neighbors[[i]])
-  expressed <- function(x) any(x > 0.1)
-  local.tf.idcs <- which(apply(tf.alphas[pp.region,], 2, expressed))
-  local.tf.data <- tf.data[, local.tf.idcs]
-  local.tf.names <- tf.names[local.tf.idcs]
-
-  pp.weights <- Dstd[, pp.idx]
-  rescale <- function(x) return(x / sum(x))
-  pp.weights <- rescale(pp.weights)
-  local.weighted.expression[[i]] <- apply(local.tf.data, 2, '*', pp.weights)
-
-  local.correlation <- weightedCor(local.tf.data, pp.weights)
-  local.correlation <- mergeDuplicates(local.correlation, local.tf.names)
-  local.correlation.mats[[i]] <- local.correlation
-}
-
-# stabiliti y based analysis of spectral clustering: take subsets of nodes and
+# stability based analysis of spectral clustering: take subsets of nodes and
 # split resulting graphs using spectral clustering. How often do genes appear in
 # the same leaf nodes
-
-root.dir <- '/Users/Karl/Desktop/LBL/NMF/gapGeneNetwork/networkPlotsOrgan/'
-for (2 in 1:length(local.correlation.mats)) {
+cor.qt <- seq(0.75, 0.95, by=0.05)
+root.dir <- '/Users/Karl/Desktop/LBL/NMF/gapGeneNetwork/networkPlots/'
+qt.stability <- matrix(1, nrow=length(pp.centers), ncol=length(cor.qt))
+for (i in 1:length(pp.centers)) {
   print(i)
   cur.dir <- paste0(root.dir, 'pp', pp.centers[i], '/')
   dir.create(cur.dir, recursive=TRUE)
@@ -58,11 +39,15 @@ for (2 in 1:length(local.correlation.mats)) {
   n.trees <- 100
 
   # stability through subsampling
-  cors <- local.correlation.mats[[i]]
+  cors <- localCor(pp.centers[i], pp.neighbors[[i]], tf.data, tf.names) 
   n.nodes <- nrow(cors)
   gene.names <- rownames(cors)
-  node.samples <- replicate(n.trees, unique(sample(1:n.nodes, replace=TRUE)), simplify=FALSE)
-  cor.samples <- lapply(node.samples, function(s) list(cors[s, s])) # subsample
+  eps <- 25
+  tf.data.noisy <- replicate(n.trees, tf.data + rexp(length(tf.data), eps), simplify=FALSE)
+  cor.samples <- lapply(tf.data.noisy, function(m) list(localCor(pp.centers[i], pp.neighbors[[i]], m, tf.names)))
+  
+  #node.samples <- replicate(n.trees, unique(sample(1:n.nodes, replace=TRUE)), simplify=FALSE)
+  #cor.samples <- lapply(node.samples, function(s) list(cors[s, s])) # subsample
   #cor.samples <- c(cor.samples, lapply(node.samples, function(s) list(cors[s, s])))
 
   #stability through noise
@@ -72,40 +57,49 @@ for (2 in 1:length(local.correlation.mats)) {
   cluster.subsamples <- lapply(cor.samples, spectralSplit, qt.thresh=0.25)
   gene.similarity.output <- geneSimilarity(cluster.subsamples, gene.names)
   gene.sim.mat <- generateSimilarityMatrix(gene.similarity.output, gene.names)
+ 
+  pdf(paste0('moduleImagePP', pp.centers[i], '.pdf'))
   gene.sim.mat <- gene.sim.mat / max(gene.sim.mat)
   diag(gene.sim.mat) <- 1
-
-  pdf(paste0('moduleImagePP', pp.centers[i], '.pdf'))
   h.cluster <- hclust(dist(1-gene.sim.mat))
   o <- h.cluster$order
   plotModuleImage(gene.sim.mat, o, col=colorRampPalette(c('white', 'orange', 'red'))(10))
   dev.off()
 
-  pdf(paste0('moduleNetworkPP', pp.centers[i], '.pdf'))
-  par(mar=rep(0, 4))
-  plotCorGraph(gene.sim.mat * sign(cors), qt.thresh=0.9, seed=10)
-  dev.off()
+  for (j in 1:length(cor.qt)) {
 
-  # local networks for inverse and marginal
-  pdf(paste0('corNetworkPP', pp.centers[i], '.pdf'))
-  cor.adj <- generateAdjacency(cors, qt.thresh=0.95)
-  plotNetwork(cor.adj * cors, gap.genes)
-  dev.off()
+    pdf(paste0('moduleNetworkPP', pp.centers[i], 'T', cor.qt[j], '.pdf'))
+    par(mar=rep(0, 4))
+    diag(gene.sim.mat) <- 0
+    plotCorGraph(gene.sim.mat * sign(cors), qt.thresh=cor.qt[j], emph.nodes=gap.genes)
+    dev.off()
 
-  pdf(paste0('gapNetwork_090_PP', pp.centers[i], '.pdf'))
-  cor.adj <- generateAdjacency(cors, qt.thresh=0.9)
-  plotNetworkSubset(cor.adj * cors, gap.genes)
-  dev.off()
+    pdf(paste0('corImagePP', pp.centers[i], 'T',  cor.qt[j], '.pdf'))
+    cor.t <- generateAdjacency(cors, cor.qt[j]) * cors
+    h.cluster <- hclust(dist(1-abs(cor.t)))
+    o <- h.cluster$order
+    plotModuleImage(abs(cor.t), o, col=colorRampPalette(c('white', 'orange', 'red'))(10))
+    dev.off()
 
-  pdf(paste0('corNetworkInvPP', pp.centers[i], '.pdf'))
-  cor.adj <- generateAdjacency(solve(cors), qt.thresh=0.95)
-  plotNetwork(cor.adj * solve(cors), gap.genes)
-  dev.off()
+    pdf(paste0('corNetworkPP', pp.centers[i], 'T', cor.qt[j], '.pdf'))
+    par(mar=rep(0, 4))
+    diag(gene.sim.mat) <- 0
+    plotCorGraph(cors, qt.thresh=cor.qt[j], emph.nodes=gap.genes)
+    dev.off()
 
-  pdf(paste0('corNetworkInvi_gap_PP', pp.centers[i], '.pdf'))
-  cor.adj <- generateAdjacency(solve(cors), qt.thresh=0.9)
-  plotNetworkSubset(cor.adj * solve(cors), gap.genes)
-  dev.off()
+    cor.adj <- lapply(cor.samples, function(m) generateAdjacency(m[[1]], qt.thresh=cor.qt[j]))
+    abind3 <- function(...) abind(..., along=3)
+    cor.adj <- do.call('abind3', cor.adj)
+    cor.sim.mat <- apply(cor.adj, MAR=c(1, 2), mean)
+    qt.stability[i,j] <- mean(apply(cor.adj, MAR=c(1, 2), var))
+
+    pdf(paste0('corImageStabPP', pp.centers[i], T, cor.qt[j], '.pdf'))
+    cor.sim.mat <- cor.sim.mat / max(cor.sim.mat)
+    diag(cor.sim.mat) <- 1
+    h.cluster <- hclust(dist(1-cor.sim.mat))
+    o <- h.cluster$order
+    plotModuleImage(cor.sim.mat, o, col=colorRampPalette(c('white', 'orange', 'red'))(10))
+    dev.off()
+  }
 }
 
-plotCorGraph(gene.sim.mat * cors, qt.thresh=0.95, emph.nodes=gap.genes, seed=50)
