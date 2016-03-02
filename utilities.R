@@ -143,47 +143,63 @@ weightedCor <- function(data.mat, w) {
   return(cor.mat)
 }
 
-localCor <- function(pp.center, pp.neighbors, tf.data, tf.names) {
+localCor <- function(center, neighbors, tf.data, tf.names, permute=FALSE) {
 
-  pp.region <- c(pp.center, pp.neighbors)
+  pp.region <- c(center, neighbors)
   expressed <- function(x) any(x > 0.1)
   local.tf.idcs <- which(apply(tf.alphas[pp.region,], 2, expressed))
   local.tf.data <- tf.data[, local.tf.idcs]
   local.tf.names <- tf.names[local.tf.idcs]
 
-  pp.weights <- Dstd[, pp.center]
+  # permute pixels expressed in the given principal pattern
+  pp.weights <- Dstd[, center]
+  if (permute) {
+    permute.idcs <- which(pp.weights >  0.1)
+    local.tf.permute <- local.tf.data[permute.idcs,]
+    local.tf.data[permute.idcs,] <- permuteData(local.tf.permute)
+  }
+
   rescale <- function(x) return(x / sum(x))
   pp.weights <- rescale(pp.weights)
-  
+
   local.cor <- weightedCor(local.tf.data, pp.weights)
   local.cor <- mergeDuplicates(local.cor, local.tf.names)
   return(local.cor)
 }
-  
-#weightedRankCorVector <- function(x, y, w) {
-#
-#  n <- length(x)
-#  ranks.x <- order(x)
-#  ranks.y <- order(y)
-#  weighted.rank.diff <- sum(w * (ranks.x - ranks.y)^2)
-#  weighted.cor <- 1 - 6 * weighted.rank.diff / (n ^ 2 - 1)
-#  return(weighted.cor)
-#}
-#
-#weightedRankCor <- function(data.mat, w) {
-#  
-#  n.obs <- ncol(data.mat)
-#  cor.mat <- matrix(0, nrow=n.obs, ncol=n.obs)
-#  for (i in 1:n.obs) {
-#    for (j in i:n.obs) {
-#      weighted.cor <- weightedRankCorVector(data.mat[,i], data.mat[,j], w)
-#      cor.mat[i, j] <- weighted.cor
-#      cor.mat[j, i] <- weighted.cor
-#    }
-#  }
-#  return(cor.mat)
-#}
 
+permuteVector <- function(x) {
+  n <- length(x)
+  x.permuted <- x[sample(1:n, n)]
+  return(x.permuted)
+}
+
+permuteData <- function(x) {
+  
+  x.permuted <- apply(x, 2, permuteVector)
+  return(x.permuted)
+}
+
+permutePval <- function(cor.mat, perm) {
+
+  permuted.dist <- sapply(perm, function(m) m[upper.tri(m, diag=FALSE)])
+  pVal <- function(x, p.dist) mean(abs(p.dist) > abs(x))
+  p.vals <- sapply(cors[upper.tri(cors, diag=FALSE)], pVal, p.dist=permuted.dist)
+  p.mat <- matrix(0, nrow=nrow(cors), ncol=ncol(cors))
+  p.mat[upper.tri(p.mat, diag=FALSE)] <- p.vals
+  p.mat[lower.tri(p.mat, diag=FALSE)] <- t(p.mat)[lower.tri(p.mat, diag=FALSE)]
+
+  return(list(val=p.vals, mat=p.mat))
+}
+
+fdr <- function(p.vals, alpha) {
+
+  m <- length(p.vals)
+  p.vals.sort <- sort(p.vals)
+  thresh.idx <- which(p.vals.sort > (alpha * (1:m)) / m)[1] - 1 
+  p.val.thresh <- p.vals.sort[thresh.idx]
+  return(p.val.thresh)
+}
+  
 mergeMax <- function(x) {
 
   # Return the maximum absolute value of each row in a matrix
