@@ -24,7 +24,7 @@ pp.neighbors <- list(c(4, 6), c(4, 7), c(6, 8), c(7, 9), c(8, 17), c(9, 20), c(1
 # stability based analysis of spectral clustering: take subsets of nodes and
 # split resulting graphs using spectral clustering. How often do genes appear in
 # the same leaf nodes
-root.dir <- '/Users/Karl/Desktop/LBL/NMF/gapGeneNetwork/networkPlotsPerm/'
+root.dir <- '/Users/Karl/Desktop/LBL/NMF/gapGeneNetwork/networkPlotsPermPW/'
 for (i in 1:length(pp.centers)) {
   print(i)
   cur.dir <- paste0(root.dir, 'pp', pp.centers[i], '/')
@@ -36,32 +36,36 @@ for (i in 1:length(pp.centers)) {
   n.trees <- 100
 
   # permutation based testing for correlation significance and fdr thresholding
-  n.rep <- 100
-  alpha <- 0.1
+  n.rep <- 250
+  alpha <- 0.01
   cors <- localCor(pp.centers[i], pp.neighbors[[i]], tf.data, tf.names) 
   
   cor.permutation <- replicate(n.rep, localCor(pp.centers[i],
-    pp.neighbors[[i]], tf.data, tf.names, permute=TRUE), simplify=FALSE) 
-  permutation.p <- permutePval(cors, cor.permutation)
-  p.val.thresh <- fdr(permutation.p$val, alpha)
-  val.thresh <- max(abs(cors[permutation.p$mat > p.val.thresh]))
+    pp.neighbors[[i]], tf.data, tf.names, permute=TRUE)) 
+  threshold <- apply(abs(cor.permutation), MAR=3, '>', abs(cors))
+  p.vals <- rowMeans(threshold)
+  p.mat <- matrix(p.vals, nrow=nrow(cors))
+  diag(p.mat) <- 0
+  p.vals <- p.mat[upper.tri(p.mat, diag=FALSE)]
+  p.val.thresh <- fdr(p.vals, alpha)
+  val.thresh <- max(abs(cors[p.mat > p.val.thresh]))
   cors.t <- cors
-  cors.t[permutation.p$mat > p.val.thresh] <- 0
+  cors.t[p.mat > p.val.thresh] <- 0
 
   # stability through subsampling
   n.nodes <- nrow(cors)
   gene.names <- rownames(cors)
-  eps <- 25
+  #eps <- 25
   #tf.data.noisy <- replicate(n.trees, tf.data + rexp(length(tf.data), eps), simplify=FALSE)
   #cor.samples <- lapply(tf.data.noisy, function(m) list(localCor(pp.centers[i], pp.neighbors[[i]], m, tf.names)))
   
-  #node.samples <- replicate(n.trees, unique(sample(1:n.nodes, replace=TRUE)), simplify=FALSE)
-  #cor.samples <- lapply(node.samples, function(s) list(cors[s, s])) # subsample
+  node.samples <- replicate(n.trees, unique(sample(1:n.nodes, replace=TRUE)), simplify=FALSE)
+  cor.samples <- lapply(node.samples, function(s) list(cors[s, s])) # subsample
 
   #stability through noise
-  set.seed(47)
-  eps <- 0.25
-  cor.samples <- lapply(1:n.trees, function(s) list(generateNoisyCor(cors, eps)))
+  #set.seed(47)
+  #eps <- 0.25
+  #cor.samples <- lapply(1:n.trees, function(s) list(generateNoisyCor(cors, eps)))
   cor.samples <- lapply(cor.samples, function(m) {
                           m <- m[[1]]
                           m[abs(m) < val.thresh] <- 0
