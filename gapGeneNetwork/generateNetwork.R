@@ -40,18 +40,31 @@ for (i in 1:length(pp.centers)) {
   alpha <- 0.01
   cors <- localCor(pp.centers[i], pp.neighbors[[i]], tf.data, tf.names) 
   
-  cor.permutation <- replicate(n.rep, localCor(pp.centers[i],
-    pp.neighbors[[i]], tf.data, tf.names, permute=TRUE)) 
-  threshold <- apply(abs(cor.permutation), MAR=3, '>', abs(cors))
-  p.vals <- rowMeans(threshold)
-  p.mat <- matrix(p.vals, nrow=nrow(cors))
-  diag(p.mat) <- 0
-  p.vals <- p.mat[upper.tri(p.mat, diag=FALSE)]
-  p.val.thresh <- fdr(p.vals, alpha)
-  val.thresh <- max(abs(cors[p.mat > p.val.thresh]))
-  cors.t <- cors
-  cors.t[p.mat > p.val.thresh] <- 0
+  #cor.permutation <- replicate(n.rep, localCor(pp.centers[i],
+  #  pp.neighbors[[i]], tf.data, tf.names, permute=TRUE)) 
+  #threshold <- apply(abs(cor.permutation), MAR=3, '>', abs(cors))
+  #p.vals <- rowMeans(threshold)
+  #p.mat <- matrix(p.vals, nrow=nrow(cors))
+  #diag(p.mat) <- 0
+  #p.vals <- p.mat[upper.tri(p.mat, diag=FALSE)]
+  #p.val.thresh <- fdr(p.vals, alpha)
+  #val.thresh <- max(abs(cors[p.mat > p.val.thresh]))
+  #cors.t <- cors
+  #cors.t[p.mat > p.val.thresh] <- 0
+  for(i in 3:6) {
+  pdf(paste0('gapPP', pp.centers[i], '.pdf'))
+  cors <- localCor(pp.centers[i], pp.neighbors[[i]], tf.data, tf.names) 
+  cors.t <- generateAdjacency(cors, qt.thresh=0.9) * cors
+  cors.gap <- cors.t[rownames(cors) %in% gap.genes, rownames(cors) %in% gap.genes]
+  pp.gap <- rownames(cors.gap)
 
+  gap.mat <- matrix(0, nrow=length(gap.genes), ncol=length(gap.genes))
+  rownames(gap.mat) <- gap.genes
+  colnames(gap.mat) <- gap.genes
+  gap.mat[pp.gap, pp.gap] <- cors.gap 
+  plotNetwork(gap.mat, emph.genes=pp.gap)
+  dev.off()
+  }
   # stability through subsampling
   n.nodes <- nrow(cors)
   gene.names <- rownames(cors)

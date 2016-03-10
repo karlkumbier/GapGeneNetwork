@@ -58,7 +58,7 @@ getWeights <- function(cor.mat, edge.names) {
   return(wts)
 } 
 
-plotCorGraph <- function(cor.mat, qt.thresh=0.5, emph.nodes=NULL, seed=47) {
+plotCorGraph <- function(cor.mat, qt.thresh=0.5, emph.nodes=NULL, seed=47, layout='fdp') {
   
   # plot graph corresponding to a correlation matrix after threshing at
   # specified value or quantile
@@ -79,7 +79,8 @@ plotCorGraph <- function(cor.mat, qt.thresh=0.5, emph.nodes=NULL, seed=47) {
   nAttrs <- list(fontcolor=node.color)
   #attrs <- list(node=list(fontsize=20, shape="ellipse", fixedsize=FALSE))
   attrs <- list(node=list(fontsize=20, shape="plaintext", fixedsize=FALSE))
-  plot(graph, "fdp", attrs=attrs, nodeAttrs=nAttrs, edgeAttrs=eAttrs)
+  #plot(graph, "fdp", attrs=attrs, nodeAttrs=nAttrs, edgeAttrs=eAttrs)
+  plot(graph, layout, attrs=attrs, nodeAttrs=nAttrs, edgeAttrs=eAttrs)
 }
 
 
