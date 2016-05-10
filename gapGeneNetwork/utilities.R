@@ -35,36 +35,52 @@ generateImage <- function(template, data) {
   return(full.img)
 } 
 
-plotCorGraph <- function(cor.mat, vals.thresh=NULL, qt.thresh=0.5, circle=FALSE) {
+plotModuleImage <- function(sim.mat, order, ...) {
+
+  sim.mat <- sim.mat[order, order]
+  image(sim.mat, axes=F, ...)
+  mtext(text=rownames(sim.mat), side=2, line=0.3, at=seq(0,1,1/nrow(sim.mat)), las=1, cex=25/nrow(sim.mat))
+  mtext(text=rownames(sim.mat), side=1, line=0.3, at=seq(0,1,1/nrow(sim.mat)), las=2, cex=25/nrow(sim.mat))
+  image.plot(sim.mat, legend.only=TRUE, horizontal=TRUE, smallplot=c(0.05, 0.45, 0.06, 0.09), ...) 
+
+}
+
+getWeight <- function(cor.mat, edge.name) {
+  # return graph edge weight associated with a pair of nodes
+  nodes <- unlist(strsplit(edge.name, '~'))
+  wt <- cor.mat[nodes[1], nodes[2]]
+  return(wt)
+} 
+
+getWeights <- function(cor.mat, edge.names) {
+  # return graph edge weights associated with a list of node pairs
+  wts <- sapply(edge.names, getWeight, cor.mat=cor.mat)
+  return(wts)
+} 
+
+plotCorGraph <- function(cor.mat, qt.thresh=0.5, emph.nodes=NULL, seed=47, layout='fdp') {
   
   # plot graph corresponding to a correlation matrix after threshing at
   # specified value or quantile
   # args:
   #  cor.mat: correlation matrix
-  #  vals.thresh: numeric vector of length two specifying upper and lower values
-  #   to thresh the correlation matrix at
-  #  qt.thresh: can be used instead of vals.thresh to indicate a quantile to
-  #   thresh at
-  #  circle: should the graph be laid out as a circle
-  if (is.null(vals.thresh)) {
-    vals.thresh <- getQtThreshold(cor.mat, qt.thresh) 
-  }
-  
-  ## remove edges for correlations below quantile thresh
-  diag(cor.mat) <- 0
-  cor.mat[cor.mat > vals.thresh[1] & cors < vals.thresh[2]] <- 0
+  #  qt.thresh: indicates a quantile to thresh at
+  adj.mat <- generateAdjacency(cor.mat, qt.thresh=qt.thresh)
+  graph <- new("graphAM", adjMat=adj.mat, edgemode="undirected")
+  node.names <- nodes(graph)
+  edge.names <- edgeNames(graph)
 
-  if (! all(cor.mat == 0)) {
-    graph <- graph.adjacency(cor.mat, mode='lower', weighted=TRUE)
-    edge.sign <- sign(E(graph)$weight)
-    E(graph)$color <- ifelse(edge.sign > 0, 'green', 'red')
+  edge.weight <- getWeights(adj.mat * cor.mat, edge.names)
+  edge.color <- ifelse(edge.weight > 0, 'blue', 'red') 
+  node.color <- rep('green3', length(emph.nodes))
+  names(node.color) <- emph.nodes
 
-    graph.layout <- layout.auto(graph)
-    if(circle) graph.layout <- layout.circle(graph)
-    plot(graph, vertex.label.cex=0.5, layout=graph.layout)
-  } else{
-    warning('no interactions at specified thresh')
-  }
+  eAttrs <- list(color=edge.color)
+  nAttrs <- list(fontcolor=node.color)
+  #attrs <- list(node=list(fontsize=20, shape="ellipse", fixedsize=FALSE))
+  attrs <- list(node=list(fontsize=20, shape="plaintext", fixedsize=FALSE))
+  #plot(graph, "fdp", attrs=attrs, nodeAttrs=nAttrs, edgeAttrs=eAttrs)
+  plot(graph, layout, attrs=attrs, nodeAttrs=nAttrs, edgeAttrs=eAttrs)
 }
 
 
@@ -82,8 +98,54 @@ plotHeatmap <- function(sim.mat, thresh=NULL, cex=1) {
                 lhei=c(1,7), lwid=c(1, 9), cexRow=cex, cexCol=cex)
 }
 
+weightedCovVector <- function(x, y, w) {
+
+  weighted.mean.x <- sum(w * x)
+  weighted.mean.y <- sum(w * y)
+  weighted.cov <- sum(w * (x - weighted.mean.x) * (y - weighted.mean.y))
+  return(weighted.cov)
+}
+
+weightedCov <- function(data.mat, w, rank=FALSE) {
+
+  # A wraper to compute weighted correlation between all vectors in a matrix
+  # args:
+  #  data.mat: the data matrix
+  #   w: a weight vector that sums to 1, giving the weight of each component
+  #   in
+  #   the correlation calculation
+  n.obs <- ncol(data.mat)
+  cov.mat <- matrix(0, nrow=n.obs, ncol=n.obs)
+  for (i in 1:n.obs) {
+    for (j in i:n.obs) {
+      weighted.cov <- weightedCovVector(data.mat[,i], data.mat[,j], w)
+      cov.mat[i, j] <- weighted.cov
+      cov.mat[j, i] <- weighted.cov
+    }
+  }
+  return(cov.mat)
+}
+
+localCov <- function(center, neighbors, tf.data, tf.alphas, tf.names) {
+
+  pp.region <- c(center, neighbors)
+  expressed <- function(x) any(x > 0.1)
+  local.tf.idcs <- which(apply(tf.alphas[pp.region,], 2, expressed))
+  local.tf.data <- tf.data[, local.tf.idcs]
+  local.tf.names <- tf.names[local.tf.idcs]
+
+  # permute pixels expressed in the given principal pattern
+  pp.weights <- Dstd[, center]
+  rescale <- function(x) return(x / sum(x))
+  pp.weights <- rescale(pp.weights)
+
+  local.cov <- weightedCov(local.tf.data, pp.weights)
+  local.cov <- mergeDuplicates(local.cov, local.tf.names)
+  return(local.cov)
+}
+
 # Functions used for generating locally weighted correlation matrices
-weightedCorVector <- function(x, y, w) {
+weightedCorVector <- function(x, y, w, rank=FALSE) {
 
   # Calculate the weighted correlation between two vectors
   # args:
@@ -97,19 +159,16 @@ weightedCorVector <- function(x, y, w) {
     return(weighted.var)
   }
 
-  weightedCov <- function(x, y, w) {
-
-    weighted.mean.x <- sum(w * x)
-    weighted.mean.y <- sum(w * y)
-    weighted.cov <- sum(w * (x - weighted.mean.x) * (y - weighted.mean.y))
-    return(weighted.cov)
+  if (rank) {
+    x <- order(x)
+    y <- order(y)
   }
-
-  weighted.cor <- weightedCov(x, y, w) / (sqrt(weightedVar(x, w)) * sqrt(weightedVar(y, w)))
+  weighted.cor <- weightedCovVector(x, y, w) / (sqrt(weightedVar(x, w)) * sqrt(weightedVar(y, w)))
   return(weighted.cor)
 }
 
-weightedCor <- function(data.mat, w) {
+
+weightedCor <- function(data.mat, w, rank=FALSE) {
 
   # A wraper to compute weighted correlation between all vectors in a matrix
   # args:
@@ -120,7 +179,7 @@ weightedCor <- function(data.mat, w) {
   cor.mat <- matrix(0, nrow=n.obs, ncol=n.obs)
   for (i in 1:n.obs) {
     for (j in i:n.obs) {
-      weighted.cor <- weightedCorVector(data.mat[,i], data.mat[,j], w)
+      weighted.cor <- weightedCorVector(data.mat[,i], data.mat[,j], w, rank)
       cor.mat[i, j] <- weighted.cor
       cor.mat[j, i] <- weighted.cor
     }
@@ -128,6 +187,65 @@ weightedCor <- function(data.mat, w) {
   return(cor.mat)
 }
 
+localCor <- function(center, neighbors, tf.data, tf.alphas, tf.names, rank=FALSE, permute=FALSE) {
+
+  pp.region <- c(center, neighbors)
+  expressed <- function(x) any(x > 0.1)
+  local.tf.idcs <- which(apply(tf.alphas[pp.region,], 2, expressed))
+  local.tf.data <- tf.data[, local.tf.idcs]
+  local.tf.names <- tf.names[local.tf.idcs]
+
+  # permute pixels expressed in the given principal pattern
+  pp.weights <- Dstd[, center]
+  if (permute) {
+    permute.idcs <- which(pp.weights >  0.1)
+    local.tf.permute <- local.tf.data[permute.idcs,]
+    local.tf.data[permute.idcs,] <- permuteData(local.tf.permute)
+  }
+
+  rescale <- function(x) return(x / sum(x))
+  pp.weights <- rescale(pp.weights)
+
+  local.cor <- weightedCor(local.tf.data, pp.weights, rank)
+  local.cor <- mergeDuplicates(local.cor, local.tf.names)
+  return(local.cor)
+}
+
+
+
+permuteVector <- function(x) {
+  n <- length(x)
+  x.permuted <- x[sample(1:n, n)]
+  return(x.permuted)
+}
+
+permuteData <- function(x) {
+  
+  x.permuted <- apply(x, 2, permuteVector)
+  return(x.permuted)
+}
+
+permutePval <- function(cor.mat, perm) {
+
+  permuted.dist <- sapply(perm, function(m) m[upper.tri(m, diag=FALSE)])
+  pVal <- function(x, p.dist) mean(abs(p.dist) > abs(x))
+  p.vals <- sapply(cors[upper.tri(cors, diag=FALSE)], pVal, p.dist=permuted.dist)
+  p.mat <- matrix(0, nrow=nrow(cors), ncol=ncol(cors))
+  p.mat[upper.tri(p.mat, diag=FALSE)] <- p.vals
+  p.mat[lower.tri(p.mat, diag=FALSE)] <- t(p.mat)[lower.tri(p.mat, diag=FALSE)]
+
+  return(list(val=p.vals, mat=p.mat))
+}
+
+fdr <- function(p.vals, alpha) {
+
+  m <- length(p.vals)
+  p.vals.sort <- sort(p.vals)
+  thresh.idx <- which(p.vals.sort > (alpha * (1:m)) / m)[1] - 1 
+  p.val.thresh <- p.vals.sort[thresh.idx]
+  return(p.val.thresh)
+}
+  
 mergeMax <- function(x) {
 
   # Return the maximum absolute value of each row in a matrix
@@ -314,6 +432,7 @@ geneSimilarity <- function(cluster.tree, genes, set.size=2) {
   }
   sameLeafProportion <- function(set, shared.idcs) {
     joint.trees <- cluster.tree[shared.idcs]
+    if (length(joint.trees) == 0) return(0) # genes in set never co-occur
     proportion <- mean(sapply(joint.trees, sameLeaf, set=set))
     return(proportion)
   }
@@ -353,7 +472,7 @@ subsetNetwork <- function(cor.mat, genes) {
   return(cor.mat[gene.idcs, gene.idcs])
 }
 
-getQtThreshold <- function(cor.mat, qt.thresh) {
+getQtThreshold <- function(cor.mat, qt.thresh, remove.zero=FALSE) {
 
   # Calculate a specified quantile for a correlation matrix
   # args:
@@ -362,6 +481,7 @@ getQtThreshold <- function(cor.mat, qt.thresh) {
 
   qt.thresh <- max(qt.thresh, 1-qt.thresh)
   cor.vector <- cor.mat[upper.tri(cor.mat, diag=FALSE)]
+  if (remove.zero) cor.vector <- cor.vector[cor.vector != 0]
   thresh <- quantile(cor.vector, c(1-qt.thresh, qt.thresh))
   return(thresh)
 }
@@ -387,6 +507,34 @@ generateAdjacency <- function(cor.mat, qt.thresh) {
   cor.mat[cor.mat != 0] <- 1
   diag(cor.mat) <- 0
   return(cor.mat)
+}
+
+
+# diffusion based metric functions
+generateTransitionMatrix <- function(adj.mat) {
+
+  normalizer <- rowSums(adj.mat)
+  normalizer <- sapply(normalizer, max, 1)
+  transition.mat <- adj.mat / normalizer
+  return(transition.mat)
+}
+
+dsdNorm <- function(u, v) {
+  return(sum(abs(u -v)))
+}
+
+matrixPow <- function(x, k) {
+
+  if (k == 2) return(x %*% x)
+  else return(x %*% matrixPow(x, k - 1))
+}
+
+diffusionDist <- function(adj.mat, k=10) {
+
+  transition.mat <- generateTransitionMatrix(adj.mat)
+  k.step <- matrixPow(transition.mat, k)
+  dist.mat <- apply(k.step, 1, function(x) apply(k.step, 1, function(y) dsdNorm(x, y)))
+  return(dist.mat)
 }
 
 modularity <- function(adjacency, label) {
@@ -424,4 +572,22 @@ getGeneNetwork <- function(cor.mat, thresh, genes) {
   gene.idcs <- which(rownames(adjacency) %in% genes)
   gene.network <- adjacency[gene.idcs, gene.idcs]
   return(gene.network)
+}
+
+setModules <- function(sim.mat, clusters) {
+
+  if (length(clusters) != nrow(sim.mat)) stop('dimension mismatch')
+
+  n.clusters <- length(unique(clusters))
+  cutMat <- function(sim.mat, c, clusters) {
+   cluster.idcs <- which(clusters==c)
+   sim.mat[cluster.idcs, -cluster.idcs] <- 0
+   sim.mat[-cluster.idcs, cluster.idcs] <- 0
+   return(sim.mat)
+  }
+
+  for (i in 1:n.clusters) {
+    sim.mat <- cutMat(sim.mat, i, clusters)
+  }
+  return(sim.mat)
 }

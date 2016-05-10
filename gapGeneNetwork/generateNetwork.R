@@ -1,14 +1,9 @@
 library(abind)
-library(R.matlab)
 library(RColorBrewer)
-library(igraph)
 library(fields)
 library(Rgraphviz)
-source('../utilities.R')
+source('./utilities.R')
 load('dictFitDataNLS.RData')
-mat.data <- readMat('embTemplate.mat')
-template <- mat.data$template[,,1]
-cols <- brewer.pal(11, 'RdYlBu')
 
 n.dict <- ncol(Dstd) - 1
 dict.mat <- array(0, c(16, 32, n.dict))
@@ -55,8 +50,8 @@ for (i in 1:length(pp.centers)) {
   #set.seed(47)
   #eps <- 0.25
   #cor.samples <- lapply(1:n.trees, function(s) list(generateNoisyCor(cors, eps)))
-  cor.samples <- lapply(cor.samples, function(m) return(list(m)))
-  cluster.subsamples <- lapply(cor.samples, spectralSplit, qt.thresh=0.5)
+  #cor.samples <- lapply(cor.samples, function(m) return(m))
+  cluster.subsamples <- lapply(cor.samples, spectralSplit, qt.thresh=0.75)
   gene.similarity.output <- geneSimilarity(cluster.subsamples, gene.names)
   gene.sim.mat <- generateSimilarityMatrix(gene.similarity.output, gene.names)
  
